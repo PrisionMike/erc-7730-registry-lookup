@@ -1,0 +1,24 @@
+{
+  "name": "erc-7730-registry-lookup",
+  "version": "0.1.0",
+  "description": "Browse the ERC-7730 clear-signing registry and generate Trezor clear-signing test artifacts",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.0.0",
+    "clipboardy": "^4.0.0",
+    "ethers": "^6.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,3 @@
+[submodule "registry"]
+	path = registry
+	url = https://github.com/ethereum/clear-signing-erc7730-registry.git
