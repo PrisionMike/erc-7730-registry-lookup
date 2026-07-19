@@ -56,21 +56,22 @@ async function filterableList<T>(
 }
 
 async function ensureSampleTx(screen: Extract<Screen, { kind: "actions" }>): Promise<SampleTx | null> {
-  if (screen.sampleTx !== undefined) return screen.sampleTx;
   const { deployment, fn } = screen;
-  console.log(
-    dim(
-      `Fetching recent ${fn.name} (${fn.selector}) transactions to ${deployment.address} on ${chainName(deployment.chainId)}…`,
-    ),
-  );
-  try {
-    screen.sampleTx = await findSampleTx(deployment.chainId, deployment.address, fn.selector);
-  } catch (err) {
-    if (err instanceof EtherscanError) {
-      console.log(yellow(`Etherscan lookup failed: ${err.message}`));
-      return null;
+  if (screen.sampleTx === undefined) {
+    console.log(
+      dim(
+        `Fetching recent ${fn.name} (${fn.selector}) transactions to ${deployment.address} on ${chainName(deployment.chainId)}…`,
+      ),
+    );
+    try {
+      screen.sampleTx = await findSampleTx(deployment.chainId, deployment.address, fn.selector);
+    } catch (err) {
+      if (err instanceof EtherscanError) {
+        console.log(yellow(`Etherscan lookup failed: ${err.message}`));
+        return null;
+      }
+      throw err;
     }
-    throw err;
   }
   if (screen.sampleTx === null) {
     console.log(
