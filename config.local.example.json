@@ -1,3 +1,7 @@
 {
-  "etherscanApiKey": ""
+  "etherscanApiKey": "",
+  "testWallet": {
+    "mnemonic": "",
+    "passphrase": ""
+  }
 }

@@ -77,15 +77,22 @@ cp config.local.example.json config.local.json
 
 ```json
 {
-  "etherscanApiKey": "YOUR_KEY_HERE"
+  "etherscanApiKey": "YOUR_KEY_HERE",
+  "testWallet": {
+    "mnemonic": "alcohol woman abuse must during monitor noble actual mixed trade anger aisle",
+    "passphrase": ""
+  }
 }
 ```
 
-`config.local.json` is gitignored — it never gets committed.
+`config.local.json` is gitignored — it never gets committed. The test wallet
+(the publicly known SLIP-14 test mnemonic shown above) is used to sign
+generated fixtures; leave it out and fixtures get empty `result` signatures.
 
 | Setting | How |
 |---|---|
 | Etherscan API key | `ETHERSCAN_API_KEY` env var, or `etherscanApiKey` in `config.local.json` |
+| Fixture-signing test wallet | `testWallet` in `config.local.json` |
 | Trezor definitions tarball (used for the `--definitions` flag, the support check, and `.dat` extraction) | `TREZOR_DEFINITIONS` env var, or you're prompted once and the path is saved to `~/.config/erc7730-lookup/config.json` |
 
 Note: a free-tier Etherscan key covers Ethereum mainnet; some other chains
@@ -120,12 +127,17 @@ trezorctl ethereum --definitions ~/Downloads/deploy.tar.xz sign-tx \
     "tx_type": null,
     "value": "0x0"
   },
-  "result": { "sig_v": 0, "sig_r": "", "sig_s": "" }
+  "result": { "sig_v": 37, "sig_r": "b7b423c0…", "sig_s": "2548c132…" }
 }
 ```
 
 The comment prefix is `supported` or `unsupported` based on the definitions
 tarball (see below); when no tarball is configured it defaults to `supported`.
+
+The `result` signatures are computed by signing the fixture's exact legacy
+EIP-155 transaction (same nonce/gas/chain-id/data) with the configured
+`testWallet` at the fixture's derivation path — so the fixture is a complete,
+verifiable test case. Without a `testWallet` they're left empty.
 
 ## Definitions tarball features
 

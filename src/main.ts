@@ -5,6 +5,7 @@ import { definitionsPath, saveDefinitionsPath } from "./config.js";
 import { EtherscanError, findSampleTx, type SampleTx } from "./etherscan.js";
 import { chainName, explorerTxUrl } from "./explorers.js";
 import { fixtureJson, slug, trezorctlCommand } from "./generate.js";
+import { testWallet } from "./localConfig.js";
 import { OUTPUT_DIR, writeFixtureFile } from "./output.js";
 import { displayFormatEntry, extractEntry, hasDefinition, TarballError } from "./tarball.js";
 import {
@@ -191,7 +192,11 @@ async function runAction(action: string, screen: Extract<Screen, { kind: "action
     await printAndCopy("Etherscan link:", explorerTxUrl(deployment.chainId, tx.hash));
   }
   if (action === "fixture" || action === "all") {
-    const json = fixtureJson(selection, tx, deployment.chainId, supported);
+    const wallet = testWallet();
+    if (!wallet) {
+      console.log(dim("No testWallet in config.local.json — result signatures left empty."));
+    }
+    const json = await fixtureJson(selection, tx, deployment.chainId, supported, wallet);
     await printAndCopy("Device test fixture:", json);
     await saveFixture(screen, json, supported);
   }
