@@ -7,13 +7,19 @@ test artifacts from **real on-chain transactions** fetched via Etherscan:
 
 - a ready-to-run `trezorctl ethereum sign-tx` command,
 - an Etherscan link to a real transaction calling that function,
-- a device test fixture JSON (drop-in for the Trezor firmware test suite).
+- a device test fixture JSON (drop-in for the Trezor firmware test suite),
+- a **Trezor support check** — is this function's clear-signing definition
+  actually in your definitions tarball?
 
-Every artifact is printed *and* copied to your clipboard.
+Every artifact is printed *and* copied to your clipboard. Fixtures are also
+saved under `output/` (gitignored), alongside the function's extracted `.dat`
+definition.
 
 ## Prerequisites
 
 - Node.js ≥ 20
+- `tar` with xz support (any normal Linux/macOS) for the definitions tarball
+  features.
 - On Linux, clipboard support needs `xclip` (X11) or `wl-clipboard` (Wayland).
   The tool still works without them — you just copy the output manually.
 
@@ -80,10 +86,10 @@ cp config.local.example.json config.local.json
 | Setting | How |
 |---|---|
 | Etherscan API key | `ETHERSCAN_API_KEY` env var, or `etherscanApiKey` in `config.local.json` |
-| Trezor definitions tarball (`--definitions` flag in generated commands) | `TREZOR_DEFINITIONS` env var, or you're prompted once and the path is saved to `~/.config/erc7730-lookup/config.json` |
+| Trezor definitions tarball (used for the `--definitions` flag, the support check, and `.dat` extraction) | `TREZOR_DEFINITIONS` env var, or you're prompted once and the path is saved to `~/.config/erc7730-lookup/config.json` |
 
-Note: the built-in free-tier Etherscan key covers Ethereum mainnet; some other
-chains (e.g. Base) require a paid plan and will report "Free API access is not
+Note: a free-tier Etherscan key covers Ethereum mainnet; some other chains
+(e.g. Base) require a paid plan and will report "Free API access is not
 supported for this chain".
 
 ## Generated artifacts
@@ -117,6 +123,37 @@ trezorctl ethereum --definitions ~/Downloads/deploy.tar.xz sign-tx \
   "result": { "sig_v": 0, "sig_r": "", "sig_s": "" }
 }
 ```
+
+The comment prefix is `supported` or `unsupported` based on the definitions
+tarball (see below); when no tarball is configured it defaults to `supported`.
+
+## Definitions tarball features
+
+The Trezor definitions tarball stores one clear-signing definition per
+function-contract-deployment:
+
+```
+definitions/eth/chain-id/<chainId>/display-format/<address>-<selector>.dat
+```
+
+A function is **supported iff that file exists in the tarball** — the
+"Check Trezor support" action tells you exactly that (the tarball index is
+loaded once per session and cached).
+
+## Output folder
+
+Generated fixtures are written to `output/` (gitignored):
+
+```
+output/
+├── morpho_MorphoBlue_borrow_1.json        ← fixture (suffix = chain id)
+└── definitions/eth/chain-id/1/display-format/
+    └── bbbbbbbbbb…ffcb-50d8cd4b.dat       ← extracted definition
+```
+
+When you create a fixture for a supported function, its `.dat` definition is
+extracted next to it, preserving the tarball's internal directory structure.
+Already-extracted definitions are left untouched.
 
 ## Development
 

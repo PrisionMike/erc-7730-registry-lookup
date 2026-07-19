@@ -1,9 +1,12 @@
+import path from "node:path";
 import { input, search, select } from "@inquirer/prompts";
 import { copy } from "./clipboard.js";
 import { definitionsPath, saveDefinitionsPath } from "./config.js";
 import { EtherscanError, findSampleTx, type SampleTx } from "./etherscan.js";
 import { chainName, explorerTxUrl } from "./explorers.js";
-import { fixtureJson, trezorctlCommand } from "./generate.js";
+import { fixtureJson, slug, trezorctlCommand } from "./generate.js";
+import { OUTPUT_DIR, writeFixtureFile } from "./output.js";
+import { displayFormatEntry, extractEntry, hasDefinition, TarballError } from "./tarball.js";
 import {
   DescriptorError,
   listDescriptorFiles,
@@ -108,7 +111,73 @@ async function printAndCopy(label: string, text: string): Promise<void> {
   }
 }
 
+/**
+ * Whether the tarball has a definition for this function-contract-deployment.
+ * Returns undefined when no tarball is configured or it cannot be read.
+ */
+async function checkSupport(
+  screen: Extract<Screen, { kind: "actions" }>,
+  { verbose }: { verbose: boolean },
+): Promise<boolean | undefined> {
+  const defs = await resolveDefinitionsPath();
+  if (!defs) {
+    if (verbose) console.log(yellow("No definitions tarball configured — cannot check Trezor support."));
+    return undefined;
+  }
+  const { fn, deployment } = screen;
+  const entry = displayFormatEntry(deployment.chainId, deployment.address, fn.selector);
+  let supported: boolean;
+  try {
+    supported = await hasDefinition(defs, deployment.chainId, deployment.address, fn.selector);
+  } catch (err) {
+    if (err instanceof TarballError) {
+      console.log(yellow(err.message));
+      return undefined;
+    }
+    throw err;
+  }
+  if (verbose) {
+    console.log(
+      supported
+        ? green(`✔ Supported — the tarball contains ${entry}`)
+        : yellow(`✗ Not supported — ${entry} is not in the tarball.`),
+    );
+  }
+  return supported;
+}
+
+async function saveFixture(
+  screen: Extract<Screen, { kind: "actions" }>,
+  json: string,
+  supported: boolean | undefined,
+): Promise<void> {
+  const { descriptor, fn, deployment } = screen;
+  const fileName = `${slug(descriptor.provider, descriptor.name, fn.name)}_${deployment.chainId}.json`;
+  const written = writeFixtureFile(fileName, json);
+  console.log(green(`✔ Fixture saved to ${path.relative(process.cwd(), written.path)}`) + (written.overwrote ? dim(" (replaced previous)") : ""));
+
+  if (!supported) return;
+  const defs = await resolveDefinitionsPath();
+  if (!defs) return;
+  const entry = displayFormatEntry(deployment.chainId, deployment.address, fn.selector);
+  try {
+    const extracted = await extractEntry(defs, entry, OUTPUT_DIR);
+    const rel = path.relative(process.cwd(), extracted.path);
+    console.log(extracted.alreadyExtracted ? dim(`Definition already extracted: ${rel}`) : green(`✔ Definition extracted to ${rel}`));
+  } catch (err) {
+    if (err instanceof TarballError) {
+      console.log(yellow(err.message));
+      return;
+    }
+    throw err;
+  }
+}
+
 async function runAction(action: string, screen: Extract<Screen, { kind: "actions" }>): Promise<void> {
+  const needsSupport = action === "support" || action === "fixture" || action === "all";
+  const supported = needsSupport ? await checkSupport(screen, { verbose: action !== "fixture" }) : undefined;
+  if (action === "support") return;
+
   const tx = await ensureSampleTx(screen);
   if (!tx) return;
   const { descriptor, fn, deployment } = screen;
@@ -122,7 +191,9 @@ async function runAction(action: string, screen: Extract<Screen, { kind: "action
     await printAndCopy("Etherscan link:", explorerTxUrl(deployment.chainId, tx.hash));
   }
   if (action === "fixture" || action === "all") {
-    await printAndCopy("Device test fixture:", fixtureJson(selection, tx, deployment.chainId));
+    const json = fixtureJson(selection, tx, deployment.chainId, supported);
+    await printAndCopy("Device test fixture:", json);
+    await saveFixture(screen, json, supported);
   }
 }
 
@@ -228,8 +299,9 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
         choices: [
           { name: "trezorctl command (from a real Etherscan payload)", value: "command" },
           { name: "Etherscan link to a real transaction", value: "link" },
-          { name: "Device test fixture JSON", value: "fixture" },
-          { name: "All three", value: "all" },
+          { name: "Device test fixture JSON (saved to output/)", value: "fixture" },
+          { name: "Check Trezor support (is the definition in the tarball?)", value: "support" },
+          { name: "All of the above", value: "all" },
           { name: "← Back", value: BACK },
         ],
       });

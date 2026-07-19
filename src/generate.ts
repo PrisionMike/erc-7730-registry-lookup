@@ -34,11 +34,11 @@ export function trezorctlCommand(tx: SampleTx, chainId: number, definitionsPath?
   );
 }
 
-export function fixtureJson(sel: Selection, tx: SampleTx, chainId: number): string {
+export function fixtureJson(sel: Selection, tx: SampleTx, chainId: number, supported?: boolean): string {
   const fixture = {
     name: slug(sel.provider, sel.descriptorName, sel.functionName),
     parameters: {
-      comment: `supported | ${explorerTxUrl(chainId, tx.hash)}`,
+      comment: `${supported === false ? "unsupported" : "supported"} | ${explorerTxUrl(chainId, tx.hash)}`,
       data: stripHexPrefix(tx.input),
       path: DERIVATION_PATH_FIXTURE,
       to_address: getAddress(tx.to),
