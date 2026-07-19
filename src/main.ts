@@ -247,8 +247,8 @@ async function main(): Promise<void> {
   console.log(dim("Registry: registry/ submodule · run `git submodule update --init` if it's empty\n"));
 
   const stack: Screen[] = [{ kind: "providers" }];
-  while (stack.length > 0) {
-    await showScreen(stack[stack.length - 1], stack);
+  for (let top = stack.at(-1); top !== undefined; top = stack.at(-1)) {
+    await showScreen(top, stack);
   }
   console.log(dim("Bye."));
 }

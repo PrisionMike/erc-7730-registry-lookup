@@ -15,7 +15,10 @@ interface Config {
 
 export function loadConfig(): Config {
   try {
-    return JSON.parse(readFileSync(CONFIG_FILE, "utf8")) as Config;
+    const parsed: unknown = JSON.parse(readFileSync(CONFIG_FILE, "utf8"));
+    if (typeof parsed !== "object" || parsed === null) return {};
+    const definitionsPath = (parsed as Record<string, unknown>).definitionsPath;
+    return typeof definitionsPath === "string" ? { definitionsPath } : {};
   } catch {
     return {};
   }

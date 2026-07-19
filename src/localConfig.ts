@@ -18,7 +18,12 @@ function readLocalConfig(): LocalConfig {
     return cached;
   }
   try {
-    cached = JSON.parse(readFileSync(LOCAL_CONFIG_FILE, "utf8")) as LocalConfig;
+    const parsed: unknown = JSON.parse(readFileSync(LOCAL_CONFIG_FILE, "utf8"));
+    const key =
+      typeof parsed === "object" && parsed !== null && "etherscanApiKey" in parsed
+        ? (parsed as Record<string, unknown>).etherscanApiKey
+        : undefined;
+    cached = typeof key === "string" && key.length > 0 ? { etherscanApiKey: key } : {};
   } catch {
     cached = {};
   }

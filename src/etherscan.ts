@@ -22,6 +22,23 @@ interface EtherscanResponse {
 
 export class EtherscanError extends Error {}
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isEtherscanResponse(value: unknown): value is EtherscanResponse {
+  return isRecord(value) && typeof value.status === "string" && typeof value.message === "string";
+}
+
+function isEtherscanTx(value: unknown): value is EtherscanTx {
+  if (!isRecord(value)) return false;
+  const stringFields = ["hash", "to", "input", "value", "blockNumber", "timeStamp"] as const;
+  return (
+    stringFields.every((f) => typeof value[f] === "string") &&
+    (typeof value.isError === "string" || value.isError === undefined)
+  );
+}
+
 export function apiKey(): string {
   const key = etherscanApiKey();
   if (!key) {
@@ -42,7 +59,10 @@ async function fetchTxList(chainId: number, address: string): Promise<EtherscanT
   if (!res.ok) {
     throw new EtherscanError(`Etherscan HTTP ${res.status}`);
   }
-  const body = (await res.json()) as EtherscanResponse;
+  const body: unknown = await res.json();
+  if (!isEtherscanResponse(body)) {
+    throw new EtherscanError("Etherscan returned an unexpected response shape");
+  }
 
   if (body.status !== "1") {
     if (typeof body.result === "string" || /no transactions/i.test(body.message)) {
@@ -57,7 +77,7 @@ async function fetchTxList(chainId: number, address: string): Promise<EtherscanT
   if (!Array.isArray(body.result)) {
     throw new EtherscanError("Etherscan returned an unexpected result shape");
   }
-  return body.result as EtherscanTx[];
+  return body.result.filter(isEtherscanTx);
 }
 
 /**
