@@ -2,6 +2,8 @@ import { blockscoutApiKey, etherscanApiKey } from "./localConfig.js";
 
 export interface SampleTx {
   hash: string;
+  /** Original sender; absent if the explorer omitted it. */
+  from?: string;
   to: string;
   input: string;
   /** Value in wei, decimal string */
@@ -120,6 +122,7 @@ function isEtherscanTx(value: unknown): value is EtherscanTx {
   const stringFields = ["hash", "to", "input", "value", "blockNumber", "timeStamp", "gas", "gasPrice"] as const;
   return (
     stringFields.every((f) => typeof value[f] === "string") &&
+    (typeof value.from === "string" || value.from === undefined) &&
     (typeof value.isError === "string" || value.isError === undefined)
   );
 }
@@ -291,6 +294,7 @@ export async function findSampleTx(chainId: number, address: string, selector: s
       ) {
         return {
           hash: tx.hash,
+          from: tx.from,
           to: tx.to,
           input: tx.input,
           value: tx.value,

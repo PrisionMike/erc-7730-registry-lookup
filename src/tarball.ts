@@ -98,6 +98,25 @@ export async function findDefinition(
 }
 
 /**
+ * Read one entry into memory. `relativeEntry` is the path below the layout
+ * prefix ("eth/chain-id/1/network.dat"); undefined when the tarball lacks it.
+ */
+export async function readEntry(tarballPath: string, relativeEntry: string): Promise<Buffer | undefined> {
+  const { prefix, entries } = await tarballLayout(tarballPath);
+  const entry = prefix + relativeEntry;
+  if (!entries.has(entry)) return undefined;
+  try {
+    const { stdout } = await execFileAsync("tar", ["-xJOf", expandTilde(tarballPath), entry], {
+      encoding: "buffer",
+      maxBuffer: 1024 * 1024,
+    });
+    return stdout;
+  } catch (err) {
+    throw new TarballError(`Cannot read ${entry}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
  * Extract a definition into destDir, preserving the tarball's internal
  * directory structure. Skips extraction when the target file already exists.
  */

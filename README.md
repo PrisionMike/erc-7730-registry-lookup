@@ -7,6 +7,8 @@ test artifacts from **real on-chain transactions** fetched via Etherscan:
 
 - a ready-to-run `trezorctl ethereum sign-tx` command,
 - an Etherscan link to a real transaction calling that function,
+- a **standard parse** of that transaction's calldata — the clear-signing
+  display the registry's own CI renders for it,
 - a device test fixture JSON (drop-in for the Trezor firmware test suite),
 - a **Trezor support check** — is this function's clear-signing definition
   actually in your definitions tarball?
@@ -21,7 +23,7 @@ definition.
 
 ## Prerequisites
 
-- Node.js ≥ 20
+- Node.js ≥ 22 (required by the clear-signing renderer)
 - `tar` with xz support (any normal Linux/macOS) for the definitions tarball
   features.
 - On Linux, clipboard support needs `xclip` (X11) or `wl-clipboard` (Wayland).
@@ -131,7 +133,7 @@ generated fixtures; leave it out and fixtures get empty `result` signatures.
 | Etherscan API key | `ETHERSCAN_API_KEY` env var, or `etherscanApiKey` in `config.local.json` |
 | Blockscout PRO API key (optional) | `BLOCKSCOUT_API_KEY` env var, or `blockscoutApiKey` in `config.local.json` |
 | Fixture-signing test wallet | `testWallet` in `config.local.json` |
-| Trezor definitions tarball (used for the `--definitions` flag, the support check, and `.dat` extraction) | `TREZOR_DEFINITIONS` env var, or `definitionsPath` in `config.local.json` — you're prompted once and the answer is saved there |
+| Trezor definitions tarball (used for the `--definitions` flag, the support check, `.dat` extraction, and token metadata in the standard parse) | `TREZOR_DEFINITIONS` env var, or `definitionsPath` in `config.local.json` — you're prompted once and the answer is saved there |
 
 Note: a free-tier Etherscan key covers Ethereum mainnet and some other
 chains; others (Optimism, Base, Gnosis, BNB) require a paid plan. Where a
@@ -159,6 +161,34 @@ trezorctl ethereum --definitions ~/Downloads/deploy.tar.xz sign-tx \
   --data 50d8cd4b… --gas-limit 312644 --gas-price 1500000000 --nonce 0 \
   0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb 0
 ```
+
+**Standard parse** — the transaction rendered by
+[`@ethereum-sourcify/clear-signing`](https://www.npmjs.com/package/@ethereum-sourcify/clear-signing),
+the reference ERC-7730 implementation the registry CI runs its Sourcify tests
+with (pinned to the same version). The Python `erc7730` package CI also
+installs only lints and converts descriptors — it never decodes calldata.
+
+```
+Intent:   Supply
+Owner:    Aave DAO
+
+Amount to supply      23924.06881 USDT
+Collateral recipient  0xdce4EBC164EcE2845ad12525DEF06b8E0DDbCC0e
+```
+
+Descriptors are read from the pinned `registry/` checkout, not GitHub, so a
+parse always matches the registry version in the banner. The function's own
+descriptor is used for the selected deployment, and every other descriptor is
+indexed too, so calldata-embedded inner calls (bundler/multicall legs, Safe
+transactions) render recursively.
+
+Token symbols/decimals and the native currency come from the definitions
+tarball — the same signed metadata the device gets — so a token the device
+would call unknown shows as a raw amount with `⚠ UNKNOWN_TOKEN`. With no
+tarball configured, every amount renders raw. Addresses are never named (no
+ENS or address book is wired in); `@.from` is the original transaction's
+sender. The renderer's warnings (`⚠ CODE: …`) are printed inline, and the full
+display model is saved to `output/…_parsed.json`.
 
 **Device test fixture** — matches the firmware test suite shape:
 
@@ -253,6 +283,7 @@ Generated fixtures are written to `output/` (gitignored):
 ```
 output/
 ├── morpho_MorphoBlue_borrow_1.json        ← fixture (suffix = chain id)
+├── morpho_MorphoBlue_borrow_1_parsed.json ← standard parse display model
 ├── morpho_MorphoBlue_borrow_format.json   ← registry display format
 ├── morpho_MorphoBlue_descriptor.json      ← descriptor file, verbatim
 └── definitions/eth/chain-id/1/display-format/

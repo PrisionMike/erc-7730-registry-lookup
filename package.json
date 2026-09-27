@@ -5,7 +5,7 @@
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "tsx src/main.ts",
@@ -14,6 +14,7 @@
     "registry:update": "tsx src/registryCli.ts update"
   },
   "dependencies": {
+    "@ethereum-sourcify/clear-signing": "0.2.2",
     "@inquirer/prompts": "^7.0.0",
     "clipboardy": "^4.0.0",
     "ethers": "^6.13.0"

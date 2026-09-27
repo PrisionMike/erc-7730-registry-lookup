@@ -6,6 +6,7 @@ import { fixtureJson, slug, trezorctlCommand } from "./generate.js";
 import { showRegistryJson } from "./jsonView.js";
 import { definitionsPath, saveDefinitionsPath, testWallet } from "./localConfig.js";
 import { OUTPUT_DIR, writeFixtureFile } from "./output.js";
+import { parseCalldata } from "./parse.js";
 import { GitError, registryState, updateTo, type RegistryState } from "./registryGit.js";
 import { pinLine, printOutcome } from "./registryReport.js";
 import { extractDefinition, findDefinition, TarballError } from "./tarball.js";
@@ -236,6 +237,9 @@ async function runAction(action: string, screen: Extract<Screen, { kind: "action
   if (action === "link" || action === "all") {
     await printAndCopy("Etherscan link:", explorerTxUrl(deployment.chainId, tx.hash));
   }
+  if (action === "parse" || action === "all") {
+    await parseCalldata(descriptor, fn, deployment, tx, await resolveDefinitionsPath());
+  }
   if (action === "fixture" || action === "all") {
     const wallet = testWallet();
     if (!wallet) {
@@ -394,6 +398,7 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
         choices: [
           { name: "trezorctl command (from a real Etherscan payload)", value: "command" },
           { name: "Etherscan link to a real transaction", value: "link" },
+          { name: "Standard parse of that transaction's calldata (registry CI renderer)", value: "parse" },
           { name: "Device test fixture JSON (saved to output/)", value: "fixture" },
           { name: "Check Trezor support (is the definition in the tarball?)", value: "support" },
           { name: "All of the above", value: "all" },
