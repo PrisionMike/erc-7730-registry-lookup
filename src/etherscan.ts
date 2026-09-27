@@ -241,12 +241,17 @@ async function fetchTxPageWithRetry(
  * next provider when the current one gives up (missing API key, non-transient
  * error, or transient retries exhausted).
  */
-async function fetchTxPageWithFallback(chainId: number, address: string, page: number): Promise<TxPage> {
-  const providers = providersForChain(chainId);
+async function fetchTxPageWithFallback(
+  providers: Provider[],
+  chainId: number,
+  address: string,
+  page: number,
+): Promise<TxPage & { provider: Provider }> {
   let lastErr: unknown = new EtherscanError("No explorer providers configured");
   for (let i = 0; i < providers.length; i++) {
+    const provider = providers[i]!;
     try {
-      return await fetchTxPageWithRetry(providers[i]!, chainId, address, page);
+      return { ...(await fetchTxPageWithRetry(provider, chainId, address, page)), provider };
     } catch (err) {
       lastErr = err;
       const next = providers[i + 1];
@@ -273,8 +278,11 @@ export async function findSampleTx(chainId: number, address: string, selector: s
   const wantTo = address.toLowerCase();
   const wantPrefix = selector.toLowerCase();
 
+  let providers = providersForChain(chainId);
   for (let page = 1; page * PAGE_SIZE <= MAX_SEARCH_DEPTH; page++) {
-    const { txs, hasMore } = await fetchTxPageWithFallback(chainId, address, page);
+    const { txs, hasMore, provider } = await fetchTxPageWithFallback(providers, chainId, address, page);
+    // Stick with whichever provider answered, so later pages don't re-ask one that already refused.
+    providers = providers.slice(providers.indexOf(provider));
     for (const tx of txs) {
       if (
         tx.isError !== "1" &&
