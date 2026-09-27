@@ -6,11 +6,10 @@ import type { TestWallet } from "./localConfig.js";
 const DERIVATION_PATH_TREZORCTL = "m/44h/60h/0h/0/0";
 const DERIVATION_PATH_FIXTURE = "m/44'/60'/0'/0/0";
 
-// Fixed legacy-tx fields shared by the fixture parameters and the signature
-// computed over them — they must stay in sync or the sigs won't verify.
+// The test wallet never sent anything, so the nonce is always 0. Gas limit and
+// price are copied from the looked-up tx; the fixture parameters and the
+// signature computed over them must use the same values or the sigs won't verify.
 const FIXTURE_NONCE = 0x0;
-const FIXTURE_GAS_PRICE = 0x14;
-const FIXTURE_GAS_LIMIT = 0x14;
 
 export interface Selection {
   provider: string;
@@ -36,7 +35,8 @@ export function trezorctlCommand(tx: SampleTx, chainId: number, definitionsPath?
     `--chain-id ${chainId} ` +
     `--address "${DERIVATION_PATH_TREZORCTL}" ` +
     `--data ${stripHexPrefix(tx.input)} ` +
-    `--gas-limit 333333 --gas-price 22 --nonce 0 ` +
+    // trezorctl reads a bare --gas-price as wei, which is what explorers report.
+    `--gas-limit ${tx.gas} --gas-price ${tx.gasPrice} --nonce ${FIXTURE_NONCE} ` +
     `${getAddress(tx.to)} ${tx.value}`
   );
 }
@@ -59,8 +59,8 @@ async function signFixtureTx(tx: SampleTx, chainId: number, wallet: TestWallet):
     type: 0,
     chainId,
     nonce: FIXTURE_NONCE,
-    gasPrice: FIXTURE_GAS_PRICE,
-    gasLimit: FIXTURE_GAS_LIMIT,
+    gasPrice: BigInt(tx.gasPrice),
+    gasLimit: BigInt(tx.gas),
     to: getAddress(tx.to),
     value: BigInt(tx.value),
     data: "0x" + stripHexPrefix(tx.input),
@@ -92,8 +92,8 @@ export async function fixtureJson(
       to_address: getAddress(tx.to),
       chain_id: chainId,
       nonce: "0x" + FIXTURE_NONCE.toString(16),
-      gas_price: "0x" + FIXTURE_GAS_PRICE.toString(16),
-      gas_limit: "0x" + FIXTURE_GAS_LIMIT.toString(16),
+      gas_price: "0x" + BigInt(tx.gasPrice).toString(16),
+      gas_limit: "0x" + BigInt(tx.gas).toString(16),
       tx_type: null,
       value: "0x" + BigInt(tx.value).toString(16),
     },

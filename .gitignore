@@ -1,3 +1,8 @@
 node_modules/
 config.local.json
 output/
+# Trezor definitions tarballs and anything extracted from them
+*.tar.xz
+deploy*/
+definitions/
+*.dat

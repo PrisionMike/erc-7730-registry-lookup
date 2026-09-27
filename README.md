@@ -10,6 +10,10 @@ test artifacts from **real on-chain transactions** fetched via Etherscan:
 - a device test fixture JSON (drop-in for the Trezor firmware test suite),
 - a **Trezor support check** — is this function's clear-signing definition
   actually in your definitions tarball?
+- the **registry's own display format** for that function, with its `$.`
+  references resolved, so you can see exactly how the registry wants the
+  transaction rendered,
+- the **whole descriptor file**, verbatim.
 
 Every artifact is printed *and* copied to your clipboard. Fixtures are also
 saved under `output/` (gitignored), alongside the function's extracted `.dat`
@@ -40,13 +44,38 @@ git submodule update --init
 
 ## Updating the registry
 
-The registry is vendored as a git submodule pinned to a specific commit. To
-pull the latest descriptors from upstream:
+The registry is vendored as a git submodule pinned to a specific commit. The
+pinned commit is shown in the startup banner, so you always know which registry
+you are looking at.
+
+To move it, pick **Registry (update / pin info)** on the home screen. You can
+jump to the latest upstream commit, or check out a specific hash or tag to see
+what a particular PR changed. Either way it reports how many commits you moved,
+which descriptor files changed, and which providers appeared or disappeared.
+
+The same thing without the TUI:
 
 ```bash
-git submodule update --remote registry
-git add registry && git commit -m "Bump registry"   # optional: pin the new version
+npm run registry:status              # what is currently pinned
+npm run registry:update              # move to the latest upstream commit
+npm run registry:update -- <ref>     # move to a specific commit hash or tag
 ```
+
+Moving the submodule leaves the parent repo showing `registry` as modified. To
+keep the new version:
+
+```bash
+git add registry && git commit -m "Bump registry"
+```
+
+Or to go back to the pinned commit:
+
+```bash
+git submodule update --checkout registry
+```
+
+Both flows refuse to touch `registry/` while it has uncommitted changes, and
+always fetch before resolving a ref, so a hash pushed minutes ago still works.
 
 ## Usage
 
@@ -58,13 +87,19 @@ Navigate with the arrow keys, press Enter to select. Provider and descriptor
 lists support type-to-filter — just start typing. Every menu has a `← Back`
 entry; Ctrl+C exits anywhere.
 
-Flow: **provider** (e.g. `morpho`) → **descriptor** (a contract, e.g.
+The home screen offers **Browse the registry** and **Registry (update / pin
+info)** (see [Updating the registry](#updating-the-registry)).
+
+Browse flow: **provider** (e.g. `morpho`) → **descriptor** (a contract, e.g.
 `MorphoBlue`) → **function** (e.g. `borrow — Borrow from Morpho Market`) →
 **chain** (from the descriptor's deployments) → **action**.
 
-The first action for a selection queries Etherscan for the most recent
-successful transaction (within the last 200) calling that function on the
-chosen deployment; it is cached and reused for subsequent actions.
+The first action that needs a real transaction queries Etherscan for the most
+recent successful one calling that function on the chosen deployment, paging
+back through up to the last 10,000 transactions (Etherscan's search limit); it
+is cached and reused for subsequent actions. The two JSON dumps read only the
+registry, so they need no API key and work for functions with no recent
+on-chain activity.
 
 ### Configuration
 
@@ -81,7 +116,8 @@ cp config.local.example.json config.local.json
   "testWallet": {
     "mnemonic": "alcohol woman abuse must during monitor noble actual mixed trade anger aisle",
     "passphrase": ""
-  }
+  },
+  "definitionsPath": "~/Downloads/deploy.tar.xz"
 }
 ```
 
@@ -93,20 +129,25 @@ generated fixtures; leave it out and fixtures get empty `result` signatures.
 |---|---|
 | Etherscan API key | `ETHERSCAN_API_KEY` env var, or `etherscanApiKey` in `config.local.json` |
 | Fixture-signing test wallet | `testWallet` in `config.local.json` |
-| Trezor definitions tarball (used for the `--definitions` flag, the support check, and `.dat` extraction) | `TREZOR_DEFINITIONS` env var, or you're prompted once and the path is saved to `~/.config/erc7730-lookup/config.json` |
+| Trezor definitions tarball (used for the `--definitions` flag, the support check, and `.dat` extraction) | `TREZOR_DEFINITIONS` env var, or `definitionsPath` in `config.local.json` — you're prompted once and the answer is saved there |
 
-Note: a free-tier Etherscan key covers Ethereum mainnet; some other chains
-(e.g. Base) require a paid plan and will report "Free API access is not
-supported for this chain".
+Note: a free-tier Etherscan key covers Ethereum mainnet and some other
+chains; others (Optimism, Base, Gnosis, BNB) require a paid plan. Where a
+keyless Blockscout instance exists (Optimism, Base, Gnosis, Celo, Arbitrum,
+Polygon, Ethereum) the tool falls back to it automatically. Flare (14),
+Songbird (19), Rootstock (30), B² (223), zkSync Era (324), Merlin (4200),
+Bitlayer (200901) and Scroll aren't on Etherscan at all and go straight to
+Blockscout; Avalanche goes straight to Routescan. BNB has no fallback.
 
 ## Generated artifacts
 
-**trezorctl command** — real calldata, fixed gas/nonce:
+**trezorctl command** — real calldata, value, gas limit and gas price (in wei)
+from the looked-up transaction; nonce is always 0:
 
 ```
 trezorctl ethereum --definitions ~/Downloads/deploy.tar.xz sign-tx \
   --chain-id 1 --address "m/44h/60h/0h/0/0" \
-  --data 50d8cd4b… --gas-limit 333333 --gas-price 22 --nonce 0 \
+  --data 50d8cd4b… --gas-limit 312644 --gas-price 1500000000 --nonce 0 \
   0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb 0
 ```
 
@@ -122,8 +163,8 @@ trezorctl ethereum --definitions ~/Downloads/deploy.tar.xz sign-tx \
     "to_address": "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
     "chain_id": 1,
     "nonce": "0x0",
-    "gas_price": "0x14",
-    "gas_limit": "0x14",
+    "gas_price": "0x59682f00",
+    "gas_limit": "0x4c544",
     "tx_type": null,
     "value": "0x0"
   },
@@ -139,14 +180,58 @@ EIP-155 transaction (same nonce/gas/chain-id/data) with the configured
 `testWallet` at the fixture's derivation path — so the fixture is a complete,
 verifiable test case. Without a `testWallet` they're left empty.
 
+**Registry display format** — what the registry says should appear on the
+device for that function, with every `$.` reference resolved. The block itself
+often lives in an included file (145 of the 247 descriptors define no formats
+of their own), and the values it points at can come from the descriptor you
+selected, so both are shown together:
+
+```json
+{
+  "function": "deposit(uint256 assets, address receiver)",
+  "selector": "0x6e553f65",
+  "source": "ercs/calldata-erc4626-vaults.json",
+  "format": {
+    "intent": "Deposit",
+    "fields": [
+      { "path": "assets", "label": "Deposit asset", "format": "tokenAmount",
+        "params": { "token": "$.metadata.constants.underlyingToken" } },
+      { "label": "Share ticker", "format": "raw",
+        "value": "$.metadata.constants.vaultTicker" }
+    ]
+  },
+  "references": {
+    "$.metadata.constants.underlyingToken": "0xA0b8…eB48",
+    "$.metadata.constants.vaultTicker": "kAaveUSDC"
+  }
+}
+```
+
+**Whole descriptor file** — the selected file verbatim, so the registry's own
+key order and formatting survive. Its include chain is printed above it.
+
+Both are copied to the clipboard and saved under `output/`. Anything longer
+than 120 lines is previewed rather than dumped, and offers to open in `$PAGER`
+(default `less`).
+
 ## Definitions tarball features
 
 The Trezor definitions tarball stores one clear-signing definition per
 function-contract-deployment:
 
 ```
-definitions/eth/chain-id/<chainId>/display-format/<address>-<selector>.dat
+<prefix>eth/chain-id/<chainId>/display-format/<address>-<selector>.dat
 ```
+
+Either ball works — point `definitionsPath` at whichever you have:
+
+| Ball | Entries look like |
+|---|---|
+| `deploy.tar.xz` | `definitions/eth/chain-id/…` |
+| `definitions.tar.xz` (nested inside `deploy.tar.xz`) | `eth/chain-id/…` |
+
+The prefix is detected per tarball from its own index, so you don't have to say
+which kind you handed over.
 
 A function is **supported iff that file exists in the tarball** — the
 "Check Trezor support" action tells you exactly that (the tarball index is
@@ -159,6 +244,8 @@ Generated fixtures are written to `output/` (gitignored):
 ```
 output/
 ├── morpho_MorphoBlue_borrow_1.json        ← fixture (suffix = chain id)
+├── morpho_MorphoBlue_borrow_format.json   ← registry display format
+├── morpho_MorphoBlue_descriptor.json      ← descriptor file, verbatim
 └── definitions/eth/chain-id/1/display-format/
     └── bbbbbbbbbb…ffcb-50d8cd4b.dat       ← extracted definition
 ```
@@ -173,7 +260,18 @@ Already-extracted definitions are left untouched.
 npm run typecheck
 ```
 
-Source layout: `src/registry.ts` (descriptor loading, resolves the `includes`
-mechanism used by ~150 registry files), `src/selector.ts` (signature → 4-byte
-selector via ethers), `src/etherscan.ts` (Etherscan V2 client),
-`src/generate.ts` (command/fixture builders), `src/main.ts` (navigation loop).
+Source layout:
+
+- `src/main.ts` — navigation loop and screen stack
+- `src/registry.ts` — descriptor loading; resolves the `includes` mechanism used
+  by ~150 registry files, and the `$.` references inside a display format
+- `src/selector.ts` — signature → 4-byte selector via ethers
+- `src/etherscan.ts` — Etherscan V2 client (with Blockscout / Routescan fallback)
+- `src/generate.ts` — trezorctl command and fixture builders
+- `src/jsonView.ts` — the display-format and descriptor JSON dumps
+- `src/registryGit.ts` — submodule status and updates; `src/registryReport.ts`
+  renders their results, shared with `src/registryCli.ts` (the `npm run
+  registry:*` entrypoint)
+- `src/tarball.ts` — Trezor definitions archive lookup and extraction
+- `src/localConfig.ts` — `config.local.json` and env overrides
+- `src/ui.ts` — terminal styling, `src/output.ts` / `src/clipboard.ts` — delivery

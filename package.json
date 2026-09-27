@@ -9,7 +9,9 @@
   },
   "scripts": {
     "start": "tsx src/main.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "registry:status": "tsx src/registryCli.ts status",
+    "registry:update": "tsx src/registryCli.ts update"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",

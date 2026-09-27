@@ -3,5 +3,6 @@
   "testWallet": {
     "mnemonic": "",
     "passphrase": ""
-  }
+  },
+  "definitionsPath": ""
 }

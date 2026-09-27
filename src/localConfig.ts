@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +13,8 @@ export interface TestWallet {
 interface LocalConfig {
   etherscanApiKey?: string;
   testWallet?: TestWallet;
+  /** Path to the Trezor definitions tarball for trezorctl --definitions */
+  definitionsPath?: string;
 }
 
 let cached: LocalConfig | undefined;
@@ -30,25 +32,29 @@ function parseTestWallet(value: unknown): TestWallet | undefined {
   };
 }
 
-function readLocalConfig(): LocalConfig {
-  if (cached) return cached;
-  if (!existsSync(LOCAL_CONFIG_FILE)) {
-    cached = {};
-    return cached;
-  }
+/** Raw parsed config.local.json, so writes can preserve keys we don't model. */
+function readRaw(): Record<string, unknown> {
+  if (!existsSync(LOCAL_CONFIG_FILE)) return {};
   try {
     const parsed: unknown = JSON.parse(readFileSync(LOCAL_CONFIG_FILE, "utf8"));
-    if (!isRecord(parsed)) {
-      cached = {};
-      return cached;
-    }
-    cached = {};
-    if (typeof parsed.etherscanApiKey === "string" && parsed.etherscanApiKey.length > 0) {
-      cached.etherscanApiKey = parsed.etherscanApiKey;
-    }
-    cached.testWallet = parseTestWallet(parsed.testWallet);
+    return isRecord(parsed) ? parsed : {};
   } catch {
-    cached = {};
+    return {};
+  }
+}
+
+function readLocalConfig(): LocalConfig {
+  if (cached) return cached;
+  const parsed = readRaw();
+  cached = {};
+  if (typeof parsed.etherscanApiKey === "string" && parsed.etherscanApiKey.length > 0) {
+    cached.etherscanApiKey = parsed.etherscanApiKey;
+  }
+  cached.testWallet = parseTestWallet(parsed.testWallet);
+  // Kept verbatim: "" is a meaningful answer meaning "omit --definitions",
+  // and distinguishing it from undefined is what stops us re-prompting.
+  if (typeof parsed.definitionsPath === "string") {
+    cached.definitionsPath = parsed.definitionsPath;
   }
   return cached;
 }
@@ -64,4 +70,21 @@ export function etherscanApiKey(): string | undefined {
 /** Test wallet used to sign generated fixtures (fills in result.sig_*). */
 export function testWallet(): TestWallet | undefined {
   return readLocalConfig().testWallet;
+}
+
+/**
+ * Definitions tarball path: TREZOR_DEFINITIONS env var wins, then
+ * config.local.json. Returns undefined when neither is set (caller may prompt
+ * and save).
+ */
+export function definitionsPath(): string | undefined {
+  return process.env.TREZOR_DEFINITIONS ?? readLocalConfig().definitionsPath;
+}
+
+/** Persist the tarball path, leaving the rest of config.local.json untouched. */
+export function saveDefinitionsPath(p: string): void {
+  const raw = readRaw();
+  raw.definitionsPath = p;
+  writeFileSync(LOCAL_CONFIG_FILE, JSON.stringify(raw, null, 2) + "\n");
+  cached = undefined;
 }

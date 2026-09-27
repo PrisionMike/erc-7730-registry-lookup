@@ -1,13 +1,15 @@
 import path from "node:path";
 import { input, search, select } from "@inquirer/prompts";
-import { copy } from "./clipboard.js";
-import { definitionsPath, saveDefinitionsPath } from "./config.js";
-import { EtherscanError, findSampleTx, type SampleTx } from "./etherscan.js";
+import { EtherscanError, findSampleTx, MAX_SEARCH_DEPTH, type SampleTx } from "./etherscan.js";
 import { chainName, explorerTxUrl } from "./explorers.js";
 import { fixtureJson, slug, trezorctlCommand } from "./generate.js";
-import { testWallet } from "./localConfig.js";
+import { showRegistryJson } from "./jsonView.js";
+import { definitionsPath, saveDefinitionsPath, testWallet } from "./localConfig.js";
 import { OUTPUT_DIR, writeFixtureFile } from "./output.js";
-import { displayFormatEntry, extractEntry, hasDefinition, TarballError } from "./tarball.js";
+import { GitError, registryState, updateTo, type RegistryState } from "./registryGit.js";
+import { pinLine, printOutcome } from "./registryReport.js";
+import { extractDefinition, findDefinition, TarballError } from "./tarball.js";
+import { bold, dim, green, printAndCopy, truncate, yellow } from "./ui.js";
 import {
   DescriptorError,
   listDescriptorFiles,
@@ -20,12 +22,9 @@ import {
 
 const BACK = Symbol("back");
 
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
-const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
-const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
-
 type Screen =
+  | { kind: "home" }
+  | { kind: "registry" }
   | { kind: "providers" }
   | { kind: "descriptors"; provider: string }
   | { kind: "functions"; descriptor: Descriptor }
@@ -34,10 +33,6 @@ type Screen =
 
 function shorten(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
 /** search prompt over a fixed list of choices, with a Back entry pinned first. */
@@ -71,7 +66,7 @@ async function ensureSampleTx(screen: Extract<Screen, { kind: "actions" }>): Pro
       screen.sampleTx = await findSampleTx(deployment.chainId, deployment.address, fn.selector);
     } catch (err) {
       if (err instanceof EtherscanError) {
-        console.log(yellow(`Etherscan lookup failed: ${err.message}`));
+        console.log(yellow(`Explorer lookup failed: ${err.message}`));
         return null;
       }
       throw err;
@@ -80,7 +75,7 @@ async function ensureSampleTx(screen: Extract<Screen, { kind: "actions" }>): Pro
   if (screen.sampleTx === null) {
     console.log(
       yellow(
-        `No successful tx matching ${fn.selector} in the last 200 txs to this contract on ${chainName(deployment.chainId)}.` +
+        `No successful tx matching ${fn.selector} in the last ${MAX_SEARCH_DEPTH} txs (Etherscan's search limit) to this contract on ${chainName(deployment.chainId)}.` +
           (screen.descriptor.deployments.length > 1 ? " Try another deployment (go back one step)." : ""),
       ),
     );
@@ -93,22 +88,49 @@ async function resolveDefinitionsPath(): Promise<string | undefined> {
   if (existing !== undefined) return existing || undefined;
   const answer = (
     await input({
-      message: "Path to Trezor definitions tarball for --definitions (leave empty to omit the flag):",
+      message:
+        "Path to Trezor definitions tarball — deploy.tar.xz or definitions.tar.xz — for --definitions (leave empty to omit the flag):",
     })
   ).trim();
   saveDefinitionsPath(answer);
   if (answer) {
-    console.log(dim("Saved. Override later with TREZOR_DEFINITIONS or by editing ~/.config/erc7730-lookup/config.json"));
+    console.log(dim("Saved. Override later with TREZOR_DEFINITIONS or by editing config.local.json"));
   }
   return answer || undefined;
 }
 
-async function printAndCopy(label: string, text: string): Promise<void> {
-  console.log(`\n${bold(label)}\n${text}\n`);
-  if (await copy(text)) {
-    console.log(green("✔ Copied to clipboard.") + "\n");
-  } else {
-    console.log(yellow("Clipboard unavailable (install xclip or wl-clipboard) — copy manually above.") + "\n");
+/** Startup must never abort just because the registry cannot be read. */
+async function registryBanner(): Promise<string> {
+  try {
+    const state = await registryState();
+    return dim(`Registry: ${pinLine(state)}`) + (state.dirty ? yellow(" (working tree dirty)") : "");
+  } catch (err) {
+    if (err instanceof GitError) return yellow(`Registry: ${err.message}`);
+    throw err;
+  }
+}
+
+/** Move the registry submodule to upstream tip, or to a ref the user names. */
+async function updateRegistry(target: "latest" | "ref", stack: Screen[]): Promise<void> {
+  let ref: string | undefined;
+  if (target === "ref") {
+    ref = (await input({ message: "Commit hash, tag or ref:" })).trim();
+    if (!ref) return;
+  }
+  try {
+    const moved = printOutcome(await updateTo(ref, () => console.log(dim("Fetching origin…"))));
+    if (moved) {
+      // Nothing above the registry screen can survive a registry change: a cached
+      // Descriptor would point at files that may no longer exist. The screen is only
+      // reachable from home, so this is a no-op today — keep it that way.
+      stack.length = Math.min(stack.length, 2);
+    }
+  } catch (err) {
+    if (err instanceof GitError) {
+      console.log(yellow(err.message));
+      return;
+    }
+    throw err;
   }
 }
 
@@ -126,10 +148,15 @@ async function checkSupport(
     return undefined;
   }
   const { fn, deployment } = screen;
-  const entry = displayFormatEntry(deployment.chainId, deployment.address, fn.selector);
+  let entry: string;
   let supported: boolean;
   try {
-    supported = await hasDefinition(defs, deployment.chainId, deployment.address, fn.selector);
+    ({ entry, found: supported } = await findDefinition(
+      defs,
+      deployment.chainId,
+      deployment.address,
+      fn.selector,
+    ));
   } catch (err) {
     if (err instanceof TarballError) {
       console.log(yellow(err.message));
@@ -160,9 +187,14 @@ async function saveFixture(
   if (!supported) return;
   const defs = await resolveDefinitionsPath();
   if (!defs) return;
-  const entry = displayFormatEntry(deployment.chainId, deployment.address, fn.selector);
   try {
-    const extracted = await extractEntry(defs, entry, OUTPUT_DIR);
+    const extracted = await extractDefinition(
+      defs,
+      deployment.chainId,
+      deployment.address,
+      fn.selector,
+      OUTPUT_DIR,
+    );
     const rel = path.relative(process.cwd(), extracted.path);
     console.log(extracted.alreadyExtracted ? dim(`Definition already extracted: ${rel}`) : green(`✔ Definition extracted to ${rel}`));
   } catch (err) {
@@ -178,6 +210,19 @@ async function runAction(action: string, screen: Extract<Screen, { kind: "action
   const needsSupport = action === "support" || action === "fixture" || action === "all";
   const supported = needsSupport ? await checkSupport(screen, { verbose: action !== "fixture" }) : undefined;
   if (action === "support") return;
+
+  if (action === "format" || action === "descriptor") {
+    try {
+      await showRegistryJson(action, screen.descriptor, screen.fn);
+    } catch (err) {
+      if (err instanceof DescriptorError) {
+        console.log(yellow(err.message));
+        return;
+      }
+      throw err;
+    }
+    return;
+  }
 
   const tx = await ensureSampleTx(screen);
   if (!tx) return;
@@ -204,12 +249,57 @@ async function runAction(action: string, screen: Extract<Screen, { kind: "action
 
 async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
   switch (screen.kind) {
+    case "home": {
+      const choice = await select<string | typeof BACK>({
+        message: "What do you want to do?",
+        choices: [
+          { name: "Browse the registry", value: "browse" },
+          { name: "Registry (update / pin info)", value: "registry" },
+          { name: "✕ Exit", value: BACK },
+        ],
+      });
+      if (choice === BACK) {
+        stack.pop();
+        return;
+      }
+      stack.push(choice === "registry" ? { kind: "registry" } : { kind: "providers" });
+      return;
+    }
+
+    case "registry": {
+      // Re-read on every visit, so the pin shown is always current after an update.
+      let state: RegistryState | undefined;
+      try {
+        state = await registryState();
+      } catch (err) {
+        if (!(err instanceof GitError)) throw err;
+        console.log(yellow(err.message));
+      }
+      const choice = await select<string | typeof BACK>({
+        message: state ? `Registry — pinned at ${pinLine(state)}` : "Registry",
+        choices: [
+          {
+            name: `Update to the latest upstream commit (origin/${state?.defaultBranch ?? "master"})`,
+            value: "latest",
+          },
+          { name: "Check out a specific commit or ref…", value: "ref" },
+          { name: "← Back", value: BACK },
+        ],
+      });
+      if (choice === BACK) {
+        stack.pop();
+        return;
+      }
+      await updateRegistry(choice === "ref" ? "ref" : "latest", stack);
+      return;
+    }
+
     case "providers": {
       const providers = listProviders();
       const choice = await filterableList(
         "Select a provider (type to filter):",
         providers.map((p) => ({ name: p, value: p })),
-        "✕ Exit",
+        "← Back",
       );
       if (choice === BACK) {
         stack.pop();
@@ -307,6 +397,8 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
           { name: "Device test fixture JSON (saved to output/)", value: "fixture" },
           { name: "Check Trezor support (is the definition in the tarball?)", value: "support" },
           { name: "All of the above", value: "all" },
+          { name: "Show the registry's display format for this function (JSON)", value: "format" },
+          { name: "Show the whole descriptor file (JSON)", value: "descriptor" },
           { name: "← Back", value: BACK },
         ],
       });
@@ -322,9 +414,9 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
 
 async function main(): Promise<void> {
   console.log(bold("ERC-7730 registry lookup — Trezor clear-signing QA helper"));
-  console.log(dim("Registry: registry/ submodule · run `git submodule update --init` if it's empty\n"));
+  console.log((await registryBanner()) + "\n");
 
-  const stack: Screen[] = [{ kind: "providers" }];
+  const stack: Screen[] = [{ kind: "home" }];
   for (let top = stack.at(-1); top !== undefined; top = stack.at(-1)) {
     await showScreen(top, stack);
   }
