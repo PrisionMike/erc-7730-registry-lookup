@@ -1,5 +1,6 @@
 {
   "etherscanApiKey": "",
+  "blockscoutApiKey": "",
   "testWallet": {
     "mnemonic": "",
     "passphrase": ""

@@ -1,4 +1,4 @@
-import { etherscanApiKey } from "./localConfig.js";
+import { blockscoutApiKey, etherscanApiKey } from "./localConfig.js";
 
 export interface SampleTx {
   hash: string;
@@ -76,6 +76,13 @@ const BLOCKSCOUT_HOSTS: Record<number, string> = {
   534352: "scroll.blockscout.com",
 };
 
+/**
+ * Chains served by the Blockscout PRO API (api.blockscout.com/<chainId>). With a
+ * key we use it instead of the per-chain host: keyless hosts can allow as few as
+ * 10 requests per ~hour, the key 5 per second. The rest run their own explorers.
+ */
+const BLOCKSCOUT_PRO_CHAINS = new Set([1, 10, 30, 100, 137, 324, 8453, 42161, 42220, 534352]);
+
 /** Chains Etherscan V2 doesn't list at all — skip the pointless first request. */
 const NOT_ON_ETHERSCAN = new Set([14, 19, 30, 223, 324, 4200, 200901, 534352]);
 
@@ -142,6 +149,10 @@ function providerUrl(provider: Provider, chainId: number, address: string, page:
     `module=account&action=txlist&address=${address}` +
     `&startblock=0&endblock=2147483647&sort=desc&page=${page}&offset=${PAGE_SIZE}`;
   if (provider === "blockscout") {
+    const key = blockscoutApiKey();
+    if (key && BLOCKSCOUT_PRO_CHAINS.has(chainId)) {
+      return `https://api.blockscout.com/${chainId}/api?${query}&apikey=${key}`;
+    }
     const host = BLOCKSCOUT_HOSTS[chainId];
     if (!host) throw new EtherscanError(`No Blockscout instance known for chainId ${chainId}`);
     return `https://${host}/api?${query}`;

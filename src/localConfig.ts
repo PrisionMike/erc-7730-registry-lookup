@@ -12,6 +12,7 @@ export interface TestWallet {
 
 interface LocalConfig {
   etherscanApiKey?: string;
+  blockscoutApiKey?: string;
   testWallet?: TestWallet;
   /** Path to the Trezor definitions tarball for trezorctl --definitions */
   definitionsPath?: string;
@@ -50,6 +51,9 @@ function readLocalConfig(): LocalConfig {
   if (typeof parsed.etherscanApiKey === "string" && parsed.etherscanApiKey.length > 0) {
     cached.etherscanApiKey = parsed.etherscanApiKey;
   }
+  if (typeof parsed.blockscoutApiKey === "string" && parsed.blockscoutApiKey.length > 0) {
+    cached.blockscoutApiKey = parsed.blockscoutApiKey;
+  }
   cached.testWallet = parseTestWallet(parsed.testWallet);
   // Kept verbatim: "" is a meaningful answer meaning "omit --definitions",
   // and distinguishing it from undefined is what stops us re-prompting.
@@ -65,6 +69,15 @@ function readLocalConfig(): LocalConfig {
  */
 export function etherscanApiKey(): string | undefined {
   return process.env.ETHERSCAN_API_KEY ?? readLocalConfig().etherscanApiKey;
+}
+
+/**
+ * Blockscout PRO API key (optional): BLOCKSCOUT_API_KEY env var wins, otherwise
+ * config.local.json. Without it we hit the keyless per-chain instances, which
+ * rate-limit hard.
+ */
+export function blockscoutApiKey(): string | undefined {
+  return process.env.BLOCKSCOUT_API_KEY ?? readLocalConfig().blockscoutApiKey;
 }
 
 /** Test wallet used to sign generated fixtures (fills in result.sig_*). */

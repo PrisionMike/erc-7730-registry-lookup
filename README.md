@@ -113,6 +113,7 @@ cp config.local.example.json config.local.json
 ```json
 {
   "etherscanApiKey": "YOUR_KEY_HERE",
+  "blockscoutApiKey": "",
   "testWallet": {
     "mnemonic": "alcohol woman abuse must during monitor noble actual mixed trade anger aisle",
     "passphrase": ""
@@ -128,6 +129,7 @@ generated fixtures; leave it out and fixtures get empty `result` signatures.
 | Setting | How |
 |---|---|
 | Etherscan API key | `ETHERSCAN_API_KEY` env var, or `etherscanApiKey` in `config.local.json` |
+| Blockscout PRO API key (optional) | `BLOCKSCOUT_API_KEY` env var, or `blockscoutApiKey` in `config.local.json` |
 | Fixture-signing test wallet | `testWallet` in `config.local.json` |
 | Trezor definitions tarball (used for the `--definitions` flag, the support check, and `.dat` extraction) | `TREZOR_DEFINITIONS` env var, or `definitionsPath` in `config.local.json` — you're prompted once and the answer is saved there |
 
@@ -138,6 +140,13 @@ Polygon, Ethereum) the tool falls back to it automatically. Flare (14),
 Songbird (19), Rootstock (30), B² (223), zkSync Era (324), Merlin (4200),
 Bitlayer (200901) and Scroll aren't on Etherscan at all and go straight to
 Blockscout; Avalanche goes straight to Routescan. BNB has no fallback.
+
+Keyless Blockscout instances rate-limit hard (HTTP 429 after ~10 requests on
+some). With a free [Blockscout PRO API key](https://dev.blockscout.com) the
+tool uses `api.blockscout.com` instead for Ethereum, Optimism, Rootstock,
+Gnosis, Polygon, zkSync Era, Base, Arbitrum, Celo and Scroll (5 requests/s).
+Flare, Songbird, B², Merlin and Bitlayer run their own explorers and aren't
+affected by the key.
 
 ## Generated artifacts
 
