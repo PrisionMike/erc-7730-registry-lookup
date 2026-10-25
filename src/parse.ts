@@ -80,7 +80,7 @@ function buildIndex(selected: Descriptor): RegistryIndex {
 }
 
 /**
- * Token and native-currency metadata come from the definitions tarball, as on
+ * Token and native-currency metadata come from the definitions source, as on
  * the device. Everything else (ENS, local names, NFT collections, block
  * timestamps) is left unresolved, so those fields render raw with a warning.
  */
@@ -203,7 +203,7 @@ export async function parseCalldata(
   const index = buildIndex(descriptor);
   const tarballErrors = new Set<string>();
   if (!tarball) {
-    console.log(dim("No definitions tarball configured — token amounts and the native currency will render raw."));
+    console.log(dim("No definitions source configured — token amounts and the native currency will render raw."));
   }
 
   const model = await format(

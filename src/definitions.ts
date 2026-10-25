@@ -1,4 +1,4 @@
-import { readEntry } from "./tarball.js";
+import { readEntry } from "./definitionsSource.js";
 
 /**
  * Token and network metadata from the Trezor definitions tarball — the same
@@ -90,15 +90,16 @@ function num(fields: ProtoFields, n: number): number | undefined {
   return typeof v === "bigint" ? Number(v) : undefined;
 }
 
-// Keyed by tarball + entry: each read decompresses the archive (~0.5s), and a
-// single parse can ask about the same token several times.
+// Keyed by source + entry: each tarball read decompresses the archive (~0.5s)
+// and each URL read is a request, and a single parse can ask about the same
+// token several times.
 const cache = new Map<string, Promise<ProtoFields | undefined>>();
 
-function definition(tarballPath: string, entry: string, type: number): Promise<ProtoFields | undefined> {
-  const key = `${tarballPath}\0${entry}`;
+function definition(source: string, entry: string, type: number): Promise<ProtoFields | undefined> {
+  const key = `${source}\0${entry}`;
   let pending = cache.get(key);
   if (!pending) {
-    pending = readEntry(tarballPath, entry).then((blob) => (blob ? payloadOf(blob, type) : undefined));
+    pending = readEntry(source, entry).then((blob) => (blob ? payloadOf(blob, type) : undefined));
     // A failed read (TarballError) must not stick for the session.
     pending.catch(() => cache.delete(key));
     cache.set(key, pending);
@@ -108,12 +109,12 @@ function definition(tarballPath: string, entry: string, type: number): Promise<P
 
 /** EthereumTokenInfo: address=1, chain_id=2, symbol=3, decimals=4, name=5. */
 export async function tokenDefinition(
-  tarballPath: string,
+  source: string,
   chainId: number,
   address: string,
 ): Promise<TokenDefinition | undefined> {
   const addr = address.toLowerCase().replace(/^0x/, "");
-  const fields = await definition(tarballPath, `eth/chain-id/${chainId}/token-${addr}.dat`, TYPE_TOKEN);
+  const fields = await definition(source, `eth/chain-id/${chainId}/token-${addr}.dat`, TYPE_TOKEN);
   if (!fields) return undefined;
   const symbol = str(fields, 3);
   const decimals = num(fields, 4);
@@ -123,10 +124,10 @@ export async function tokenDefinition(
 
 /** EthereumNetworkInfo: chain_id=1, symbol=2, slip44=3, name=4. */
 export async function networkDefinition(
-  tarballPath: string,
+  source: string,
   chainId: number,
 ): Promise<NetworkDefinition | undefined> {
-  const fields = await definition(tarballPath, `eth/chain-id/${chainId}/network.dat`, TYPE_NETWORK);
+  const fields = await definition(source, `eth/chain-id/${chainId}/network.dat`, TYPE_NETWORK);
   if (!fields) return undefined;
   const symbol = str(fields, 2);
   if (symbol === undefined) return undefined;

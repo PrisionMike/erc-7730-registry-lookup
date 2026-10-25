@@ -28,6 +28,7 @@ export function slug(...parts: string[]): string {
     .replace(/^_+|_+$/g, "");
 }
 
+/** `definitionsPath` is whatever --definitions takes: a tarball path or a URL. */
 export function trezorctlCommand(tx: SampleTx, chainId: number, definitionsPath?: string): string {
   const definitions = definitionsPath ? `--definitions ${definitionsPath} ` : "";
   return (

@@ -120,6 +120,7 @@ cp config.local.example.json config.local.json
     "mnemonic": "alcohol woman abuse must during monitor noble actual mixed trade anger aisle",
     "passphrase": ""
   },
+  "definitionsSource": "tarball",
   "definitionsPath": "~/Downloads/deploy.tar.xz"
 }
 ```
@@ -133,7 +134,8 @@ generated fixtures; leave it out and fixtures get empty `result` signatures.
 | Etherscan API key | `ETHERSCAN_API_KEY` env var, or `etherscanApiKey` in `config.local.json` |
 | Blockscout PRO API key (optional) | `BLOCKSCOUT_API_KEY` env var, or `blockscoutApiKey` in `config.local.json` |
 | Fixture-signing test wallet | `testWallet` in `config.local.json` |
-| Trezor definitions tarball (used for the `--definitions` flag, the support check, `.dat` extraction, and token metadata in the standard parse) | `TREZOR_DEFINITIONS` env var, or `definitionsPath` in `config.local.json` — you're prompted once and the answer is saved there |
+| Definitions source (used for the `--definitions` flag, the support check, `.dat` extraction, and token metadata in the standard parse) | Pick it from **Definitions source** on the home screen, or set `definitionsSource` (`tarball` · `dev` · `prod`) in `config.local.json`. See [Definitions source](#definitions-source) |
+| Definitions tarball path (when the source is `tarball`) | `TREZOR_DEFINITIONS` env var, or `definitionsPath` in `config.local.json` — you're prompted once and the answer is saved there |
 
 Note: a free-tier Etherscan key covers Ethereum mainnet and some other
 chains; others (Optimism, Base, Gnosis, BNB) require a paid plan. Where a
@@ -253,6 +255,28 @@ Both are copied to the clipboard and saved under `output/`. Anything longer
 than 120 lines is previewed rather than dumped, and offers to open in `$PAGER`
 (default `less`).
 
+## Definitions source
+
+The **Definitions source** entry on the home screen picks where definitions
+come from. Whatever you pick is what `trezorctl --definitions` gets, and what
+the support check, the `.dat` download and the token metadata in the standard
+parse read from:
+
+| Source | `--definitions` value |
+|---|---|
+| **Tarball** (default) | your tarball path — offered pre-filled with the current one, edit it freely (leave empty to omit the flag) |
+| **Dev definitions** | `https://dev.firmware.sldev.cz/unsigned/v2/definitions/` — the output of trezor/definitions' "[Deploy] unsigned dev firmware definitions" workflow |
+| **Prod definitions** | `https://data.trezor.io/firmware/definitions/v2/` |
+
+Both URLs are the v2 tree (`trzd2` blobs). trezorlib's own `-a` default is the
+unversioned `data.trezor.io/firmware/definitions/` path, which still serves
+legacy v1 blobs. The selection is saved as `definitionsSource` in
+`config.local.json`.
+
+With a URL source nothing is unpacked: a function is supported iff the URL
+serves its `.dat`, and creating a fixture downloads that `.dat` into `output/`
+exactly where a tarball would have extracted it (`output/eth/chain-id/…`).
+
 ## Definitions tarball features
 
 The Trezor definitions tarball stores one clear-signing definition per
@@ -291,8 +315,9 @@ output/
 ```
 
 When you create a fixture for a supported function, its `.dat` definition is
-extracted next to it, preserving the tarball's internal directory structure.
-Already-extracted definitions are left untouched.
+extracted next to it, preserving the tarball's internal directory structure
+(or downloaded, for the dev/prod sources). Already-extracted definitions are
+left untouched.
 
 ## Development
 
@@ -312,6 +337,7 @@ Source layout:
 - `src/registryGit.ts` — submodule status and updates; `src/registryReport.ts`
   renders their results, shared with `src/registryCli.ts` (the `npm run
   registry:*` entrypoint)
+- `src/definitionsSource.ts` — tarball-or-URL dispatch for lookup, `.dat` extraction/download, and the dev/prod URLs
 - `src/tarball.ts` — Trezor definitions archive lookup and extraction
 - `src/localConfig.ts` — `config.local.json` and env overrides
 - `src/ui.ts` — terminal styling, `src/output.ts` / `src/clipboard.ts` — delivery

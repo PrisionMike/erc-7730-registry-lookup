@@ -4,12 +4,26 @@ import { EtherscanError, findSampleTx, MAX_SEARCH_DEPTH, type SampleTx } from ".
 import { chainName, explorerTxUrl } from "./explorers.js";
 import { fixtureJson, slug, trezorctlCommand } from "./generate.js";
 import { showRegistryJson } from "./jsonView.js";
-import { definitionsPath, saveDefinitionsPath, testWallet } from "./localConfig.js";
+import {
+  DEV_DEFINITIONS_URL,
+  extractDefinition,
+  findDefinition,
+  normalizeSource,
+  PROD_DEFINITIONS_URL,
+} from "./definitionsSource.js";
+import {
+  definitionsPath,
+  definitionsSourceKind,
+  saveDefinitionsPath,
+  saveDefinitionsSourceKind,
+  testWallet,
+  type DefinitionsSourceKind,
+} from "./localConfig.js";
 import { OUTPUT_DIR, writeFixtureFile } from "./output.js";
 import { parseCalldata } from "./parse.js";
 import { GitError, registryState, updateTo, type RegistryState } from "./registryGit.js";
 import { pinLine, printOutcome } from "./registryReport.js";
-import { extractDefinition, findDefinition, TarballError } from "./tarball.js";
+import { TarballError } from "./tarball.js";
 import { bold, dim, green, printAndCopy, truncate, yellow } from "./ui.js";
 import {
   DescriptorError,
@@ -26,6 +40,7 @@ const BACK = Symbol("back");
 type Screen =
   | { kind: "home" }
   | { kind: "registry" }
+  | { kind: "definitions" }
   | { kind: "providers" }
   | { kind: "descriptors"; provider: string }
   | { kind: "functions"; descriptor: Descriptor }
@@ -84,9 +99,13 @@ async function ensureSampleTx(screen: Extract<Screen, { kind: "actions" }>): Pro
   return screen.sampleTx;
 }
 
-async function resolveDefinitionsPath(): Promise<string | undefined> {
+/** What --definitions gets for the selected source: a tarball path or a URL; undefined omits the flag. */
+async function resolveDefinitionsSource(): Promise<string | undefined> {
+  const kind = definitionsSourceKind();
+  if (kind === "dev") return DEV_DEFINITIONS_URL;
+  if (kind === "prod") return PROD_DEFINITIONS_URL;
   const existing = definitionsPath();
-  if (existing !== undefined) return existing || undefined;
+  if (existing !== undefined) return normalizeSource(existing) || undefined;
   const answer = (
     await input({
       message:
@@ -95,9 +114,20 @@ async function resolveDefinitionsPath(): Promise<string | undefined> {
   ).trim();
   saveDefinitionsPath(answer);
   if (answer) {
-    console.log(dim("Saved. Override later with TREZOR_DEFINITIONS or by editing config.local.json"));
+    console.log(dim("Saved. Override later with TREZOR_DEFINITIONS, by editing config.local.json, or via “Definitions source” on the home screen."));
   }
-  return answer || undefined;
+  return normalizeSource(answer) || undefined;
+}
+
+function describeDefinitionsSource(kind: DefinitionsSourceKind): string {
+  switch (kind) {
+    case "dev":
+      return `Dev definitions (${DEV_DEFINITIONS_URL})`;
+    case "prod":
+      return `Prod definitions (${PROD_DEFINITIONS_URL})`;
+    case "tarball":
+      return `Tarball (${definitionsPath() || "none — --definitions omitted"})`;
+  }
 }
 
 /** Startup must never abort just because the registry cannot be read. */
@@ -136,16 +166,17 @@ async function updateRegistry(target: "latest" | "ref", stack: Screen[]): Promis
 }
 
 /**
- * Whether the tarball has a definition for this function-contract-deployment.
- * Returns undefined when no tarball is configured or it cannot be read.
+ * Whether the definitions source (tarball or URL) has a definition for this
+ * function-contract-deployment. Returns undefined when none is configured or
+ * it cannot be read.
  */
 async function checkSupport(
   screen: Extract<Screen, { kind: "actions" }>,
   { verbose }: { verbose: boolean },
 ): Promise<boolean | undefined> {
-  const defs = await resolveDefinitionsPath();
+  const defs = await resolveDefinitionsSource();
   if (!defs) {
-    if (verbose) console.log(yellow("No definitions tarball configured — cannot check Trezor support."));
+    if (verbose) console.log(yellow("No definitions source configured — cannot check Trezor support."));
     return undefined;
   }
   const { fn, deployment } = screen;
@@ -168,8 +199,8 @@ async function checkSupport(
   if (verbose) {
     console.log(
       supported
-        ? green(`✔ Supported — the tarball contains ${entry}`)
-        : yellow(`✗ Not supported — ${entry} is not in the tarball.`),
+        ? green(`✔ Supported — the definitions source contains ${entry}`)
+        : yellow(`✗ Not supported — ${entry} is not in the definitions source.`),
     );
   }
   return supported;
@@ -186,7 +217,7 @@ async function saveFixture(
   console.log(green(`✔ Fixture saved to ${path.relative(process.cwd(), written.path)}`) + (written.overwrote ? dim(" (replaced previous)") : ""));
 
   if (!supported) return;
-  const defs = await resolveDefinitionsPath();
+  const defs = await resolveDefinitionsSource();
   if (!defs) return;
   try {
     const extracted = await extractDefinition(
@@ -231,14 +262,14 @@ async function runAction(action: string, screen: Extract<Screen, { kind: "action
   const selection = { provider: descriptor.provider, descriptorName: descriptor.name, functionName: fn.name };
 
   if (action === "command" || action === "all") {
-    const defs = await resolveDefinitionsPath();
+    const defs = await resolveDefinitionsSource();
     await printAndCopy("trezorctl command:", trezorctlCommand(tx, deployment.chainId, defs));
   }
   if (action === "link" || action === "all") {
     await printAndCopy("Etherscan link:", explorerTxUrl(deployment.chainId, tx.hash));
   }
   if (action === "parse" || action === "all") {
-    await parseCalldata(descriptor, fn, deployment, tx, await resolveDefinitionsPath());
+    await parseCalldata(descriptor, fn, deployment, tx, await resolveDefinitionsSource());
   }
   if (action === "fixture" || action === "all") {
     const wallet = testWallet();
@@ -259,6 +290,11 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
         choices: [
           { name: "Browse the registry", value: "browse" },
           { name: "Registry (update / pin info)", value: "registry" },
+          {
+            name: "Definitions source (tarball / dev / prod)",
+            value: "definitions",
+            description: dim(`Current: ${describeDefinitionsSource(definitionsSourceKind())}`),
+          },
           { name: "✕ Exit", value: BACK },
         ],
       });
@@ -266,7 +302,60 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
         stack.pop();
         return;
       }
-      stack.push(choice === "registry" ? { kind: "registry" } : { kind: "providers" });
+      stack.push(
+        choice === "registry"
+          ? { kind: "registry" }
+          : choice === "definitions"
+            ? { kind: "definitions" }
+            : { kind: "providers" },
+      );
+      return;
+    }
+
+    case "definitions": {
+      const current = definitionsSourceKind();
+      const label = (kind: DefinitionsSourceKind, name: string) => (kind === current ? `${name} (current)` : name);
+      const choice = await select<DefinitionsSourceKind | typeof BACK>({
+        message: "Where should definitions come from?",
+        default: current,
+        choices: [
+          {
+            name: label("tarball", "Tarball"),
+            value: "tarball",
+            description: dim(`Local deploy.tar.xz / definitions.tar.xz — currently ${definitionsPath() || "not set"}`),
+          },
+          {
+            name: label("dev", "Dev definitions"),
+            value: "dev",
+            description: dim(`${DEV_DEFINITIONS_URL} (trezor/definitions “unsigned dev” deploy, v2)`),
+          },
+          {
+            name: label("prod", "Prod definitions"),
+            value: "prod",
+            description: dim(`${PROD_DEFINITIONS_URL} (data.trezor.io, v2)`),
+          },
+          { name: "← Back", value: BACK },
+        ],
+      });
+      if (choice === BACK) {
+        stack.pop();
+        return;
+      }
+      if (choice === "tarball") {
+        const answer = (
+          await input({
+            message: "Path to Trezor definitions tarball (or URL) for --definitions (leave empty to omit the flag):",
+            default: definitionsPath() || undefined,
+          })
+        ).trim();
+        saveDefinitionsPath(answer);
+        if (process.env.TREZOR_DEFINITIONS !== undefined) {
+          console.log(yellow("TREZOR_DEFINITIONS is set and takes precedence over the saved path."));
+        }
+      }
+      saveDefinitionsSourceKind(choice);
+      console.log(green(`✔ Definitions source: ${describeDefinitionsSource(choice)}`));
+      stack.pop();
       return;
     }
 
@@ -400,7 +489,7 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
           { name: "Etherscan link to a real transaction", value: "link" },
           { name: "Standard parse of that transaction's calldata (registry CI renderer)", value: "parse" },
           { name: "Device test fixture JSON (saved to output/)", value: "fixture" },
-          { name: "Check Trezor support (is the definition in the tarball?)", value: "support" },
+          { name: "Check Trezor support (is the definition in the definitions source?)", value: "support" },
           { name: "All of the above", value: "all" },
           { name: "Show the registry's display format for this function (JSON)", value: "format" },
           { name: "Show the whole descriptor file (JSON)", value: "descriptor" },

@@ -10,10 +10,15 @@ export interface TestWallet {
   passphrase: string;
 }
 
+/** Where trezorctl --definitions points: a tarball you hold, or the dev/prod deploys. */
+export type DefinitionsSourceKind = "tarball" | "dev" | "prod";
+
 interface LocalConfig {
   etherscanApiKey?: string;
   blockscoutApiKey?: string;
   testWallet?: TestWallet;
+  /** Which definitions source to use; absent means "tarball", as before this option existed. */
+  definitionsSource?: DefinitionsSourceKind;
   /** Path to the Trezor definitions tarball for trezorctl --definitions */
   definitionsPath?: string;
 }
@@ -55,6 +60,9 @@ function readLocalConfig(): LocalConfig {
     cached.blockscoutApiKey = parsed.blockscoutApiKey;
   }
   cached.testWallet = parseTestWallet(parsed.testWallet);
+  if (parsed.definitionsSource === "tarball" || parsed.definitionsSource === "dev" || parsed.definitionsSource === "prod") {
+    cached.definitionsSource = parsed.definitionsSource;
+  }
   // Kept verbatim: "" is a meaningful answer meaning "omit --definitions",
   // and distinguishing it from undefined is what stops us re-prompting.
   if (typeof parsed.definitionsPath === "string") {
@@ -86,7 +94,7 @@ export function testWallet(): TestWallet | undefined {
 }
 
 /**
- * Definitions tarball path: TREZOR_DEFINITIONS env var wins, then
+ * Definitions tarball path (tarball source only): TREZOR_DEFINITIONS env var wins, then
  * config.local.json. Returns undefined when neither is set (caller may prompt
  * and save).
  */
@@ -94,10 +102,24 @@ export function definitionsPath(): string | undefined {
   return process.env.TREZOR_DEFINITIONS ?? readLocalConfig().definitionsPath;
 }
 
-/** Persist the tarball path, leaving the rest of config.local.json untouched. */
-export function saveDefinitionsPath(p: string): void {
+/** Selected definitions source; "tarball" unless the user picked otherwise. */
+export function definitionsSourceKind(): DefinitionsSourceKind {
+  return readLocalConfig().definitionsSource ?? "tarball";
+}
+
+/** Persist one key, leaving the rest of config.local.json untouched. */
+function saveKey(key: string, value: string): void {
   const raw = readRaw();
-  raw.definitionsPath = p;
+  raw[key] = value;
   writeFileSync(LOCAL_CONFIG_FILE, JSON.stringify(raw, null, 2) + "\n");
   cached = undefined;
+}
+
+/** Persist the tarball path. */
+export function saveDefinitionsPath(p: string): void {
+  saveKey("definitionsPath", p);
+}
+
+export function saveDefinitionsSourceKind(kind: DefinitionsSourceKind): void {
+  saveKey("definitionsSource", kind);
 }
