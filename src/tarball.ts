@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -114,32 +114,4 @@ export async function readEntry(tarballPath: string, relativeEntry: string): Pro
   } catch (err) {
     throw new TarballError(`Cannot read ${entry}: ${err instanceof Error ? err.message : String(err)}`);
   }
-}
-
-/**
- * Extract a definition into destDir, preserving the tarball's internal
- * directory structure. Skips extraction when the target file already exists.
- */
-export async function extractDefinition(
-  tarballPath: string,
-  chainId: number,
-  address: string,
-  selector: string,
-  destDir: string,
-): Promise<{ entry: string; path: string; alreadyExtracted: boolean }> {
-  const { entry } = await findDefinition(tarballPath, chainId, address, selector);
-  const target = path.join(destDir, entry);
-  if (existsSync(target)) {
-    return { entry, path: target, alreadyExtracted: true };
-  }
-  mkdirSync(destDir, { recursive: true });
-  try {
-    await execFileAsync("tar", ["-xJf", expandTilde(tarballPath), "-C", destDir, entry]);
-  } catch (err) {
-    throw new TarballError(`Cannot extract ${entry}: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (!existsSync(target)) {
-    throw new TarballError(`Extraction ran but ${target} did not appear`);
-  }
-  return { entry, path: target, alreadyExtracted: false };
 }

@@ -1,5 +1,3 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import * as tarball from "./tarball.js";
 import { TarballError } from "./tarball.js";
 
@@ -7,7 +5,7 @@ import { TarballError } from "./tarball.js";
  * Where definitions come from. A "source" string is whatever trezorctl's
  * --definitions takes: a tarball path, or an http(s) base URL that the
  * `eth/chain-id/…` entries hang off. Everything here accepts either, so the
- * support check, .dat extraction and token metadata work the same for both.
+ * support check, fixture definition JSON and token metadata work the same for both.
  *
  * Both URLs point at the v2 tree (trzd2 blobs). trezorlib's own default
  * (`-a`) is the unversioned data.trezor.io path, which still serves v1 blobs.
@@ -33,8 +31,8 @@ export function normalizeSource(source: string): string {
   return isUrl(source) && !source.endsWith("/") ? `${source}/` : source;
 }
 
-// One GET per URL per session: the support check and the extraction that
-// follows it ask for the same blob.
+// One GET per URL per session: the support check and the fixture's definition
+// JSON that follows it ask for the same blob.
 const fetched = new Map<string, Promise<Buffer | undefined>>();
 const servingChecks = new Map<string, Promise<void>>();
 
@@ -108,31 +106,4 @@ export async function findDefinition(
 /** Read one entry ("eth/chain-id/1/network.dat") into memory; undefined when the source lacks it. */
 export async function readEntry(source: string, relativeEntry: string): Promise<Buffer | undefined> {
   return isUrl(source) ? remoteEntry(source, relativeEntry) : tarball.readEntry(source, relativeEntry);
-}
-
-/**
- * Put a definition's .dat under destDir — extracted from a tarball, or
- * downloaded from a URL — at the same `eth/chain-id/…` structure. Skips the
- * work when the target file already exists.
- */
-export async function extractDefinition(
-  source: string,
-  chainId: number,
-  address: string,
-  selector: string,
-  destDir: string,
-): Promise<{ entry: string; path: string; alreadyExtracted: boolean }> {
-  if (!isUrl(source)) return tarball.extractDefinition(source, chainId, address, selector, destDir);
-  const entry = tarball.displayFormatEntry("", chainId, address, selector);
-  const target = path.join(destDir, entry);
-  if (existsSync(target)) {
-    return { entry, path: target, alreadyExtracted: true };
-  }
-  const blob = await remoteEntry(source, entry);
-  if (!blob) {
-    throw new TarballError(`${normalizeSource(source)}${entry} does not exist`);
-  }
-  mkdirSync(path.dirname(target), { recursive: true });
-  writeFileSync(target, blob);
-  return { entry, path: target, alreadyExtracted: false };
 }
