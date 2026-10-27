@@ -11,7 +11,8 @@
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
     "registry:status": "tsx src/registryCli.ts status",
-    "registry:update": "tsx src/registryCli.ts update"
+    "registry:update": "tsx src/registryCli.ts update",
+    "dat-to-json": "tsx src/datToJsonCli.ts"
   },
   "dependencies": {
     "@ethereum-sourcify/clear-signing": "0.2.2",

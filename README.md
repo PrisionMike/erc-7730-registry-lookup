@@ -18,8 +18,8 @@ test artifacts from **real on-chain transactions** fetched via Etherscan:
 - the **whole descriptor file**, verbatim.
 
 Every artifact is printed *and* copied to your clipboard. Fixtures are also
-saved under `output/` (gitignored), alongside the function's extracted `.dat`
-definition.
+saved under `output/` (gitignored), alongside the function's definition as
+the JSON the firmware tests read.
 
 ## Prerequisites
 
@@ -134,7 +134,7 @@ generated fixtures; leave it out and fixtures get empty `result` signatures.
 | Etherscan API key | `ETHERSCAN_API_KEY` env var, or `etherscanApiKey` in `config.local.json` |
 | Blockscout PRO API key (optional) | `BLOCKSCOUT_API_KEY` env var, or `blockscoutApiKey` in `config.local.json` |
 | Fixture-signing test wallet | `testWallet` in `config.local.json` |
-| Definitions source (used for the `--definitions` flag, the support check, `.dat` extraction, and token metadata in the standard parse) | Pick it from **Definitions source** on the home screen, or set `definitionsSource` (`tarball` · `dev` · `prod`) in `config.local.json`. See [Definitions source](#definitions-source) |
+| Definitions source (used for the `--definitions` flag, the support check, the fixture's definition JSON, and token metadata in the standard parse) | Pick it from **Definitions source** on the home screen, or set `definitionsSource` (`tarball` · `dev` · `prod`) in `config.local.json`. See [Definitions source](#definitions-source) |
 | Definitions tarball path (when the source is `tarball`) | `TREZOR_DEFINITIONS` env var, or `definitionsPath` in `config.local.json` — you're prompted once and the answer is saved there |
 
 Note: a free-tier Etherscan key covers Ethereum mainnet and some other
@@ -259,8 +259,8 @@ than 120 lines is previewed rather than dumped, and offers to open in `$PAGER`
 
 The **Definitions source** entry on the home screen picks where definitions
 come from. Whatever you pick is what `trezorctl --definitions` gets, and what
-the support check, the `.dat` download and the token metadata in the standard
-parse read from:
+the support check, the fixture's definition JSON and the token metadata in the
+standard parse read from:
 
 | Source | `--definitions` value |
 |---|---|
@@ -274,8 +274,8 @@ legacy v1 blobs. The selection is saved as `definitionsSource` in
 `config.local.json`.
 
 With a URL source nothing is unpacked: a function is supported iff the URL
-serves its `.dat`, and creating a fixture downloads that `.dat` into `output/`
-exactly where a tarball would have extracted it (`output/eth/chain-id/…`).
+serves its `.dat`, and creating a fixture downloads that `.dat` and converts it
+to JSON, just as it would from a tarball.
 
 ## Definitions tarball features
 
@@ -310,14 +310,27 @@ output/
 ├── morpho_MorphoBlue_borrow_1_parsed.json ← standard parse display model
 ├── morpho_MorphoBlue_borrow_format.json   ← registry display format
 ├── morpho_MorphoBlue_descriptor.json      ← descriptor file, verbatim
-└── definitions/eth/chain-id/1/display-format/
-    └── bbbbbbbbbb…ffcb-50d8cd4b.dat       ← extracted definition
+└── eth/chain-id/1/display-format/
+    └── bbbbbbbbbb…ffcb-50d8cd4b.json      ← definition, as test JSON
 ```
 
-When you create a fixture for a supported function, its `.dat` definition is
-extracted next to it, preserving the tarball's internal directory structure
-(or downloaded, for the dev/prod sources). Already-extracted definitions are
-left untouched.
+When you create a fixture for a supported function, its definition is read
+from the definitions source and saved as JSON under `output/eth/chain-id/…` —
+the same layout as trezor-firmware's
+`common/tests/fixtures/ethereum/definitions/`, so the tree can be copied there
+as is. The device tests no longer take `.dat` files: they read these JSONs and
+dev-sign them on the fly (trezor-firmware#8001). The JSON is the decoded
+protobuf payload, byte-identical to what trezor-firmware's
+`tools/snippets/eth_defs_dat_to_json.py` writes, except that the signature is
+not verified (the tests re-sign anyway). It is rewritten on every fixture, so
+it always reflects the current source.
+
+To convert a `.dat` you already have:
+
+```bash
+npm run dat-to-json -- <file.dat>            # writes <file>.json next to it
+npm run dat-to-json -- <file.dat> -o -       # or -o <out.json>; - is stdout
+```
 
 ## Development
 
@@ -337,7 +350,9 @@ Source layout:
 - `src/registryGit.ts` — submodule status and updates; `src/registryReport.ts`
   renders their results, shared with `src/registryCli.ts` (the `npm run
   registry:*` entrypoint)
-- `src/definitionsSource.ts` — tarball-or-URL dispatch for lookup, `.dat` extraction/download, and the dev/prod URLs
-- `src/tarball.ts` — Trezor definitions archive lookup and extraction
+- `src/definitionsSource.ts` — tarball-or-URL dispatch for lookup and reads, and the dev/prod URLs
+- `src/tarball.ts` — Trezor definitions archive lookup and reads
+- `src/definitionJson.ts` — `.dat` → firmware test JSON (a port of trezorlib's
+  protobuf decoding); `src/datToJsonCli.ts` is its `npm run dat-to-json` entrypoint
 - `src/localConfig.ts` — `config.local.json` and env overrides
 - `src/ui.ts` — terminal styling, `src/output.ts` / `src/clipboard.ts` — delivery

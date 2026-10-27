@@ -4,12 +4,13 @@ import { EtherscanError, findSampleTx, MAX_SEARCH_DEPTH, type SampleTx } from ".
 import { chainName, explorerTxUrl } from "./explorers.js";
 import { fixtureJson, slug, trezorctlCommand } from "./generate.js";
 import { showRegistryJson } from "./jsonView.js";
+import { DefinitionDecodeError, definitionToJson } from "./definitionJson.js";
 import {
   DEV_DEFINITIONS_URL,
-  extractDefinition,
   findDefinition,
   normalizeSource,
   PROD_DEFINITIONS_URL,
+  readEntry,
 } from "./definitionsSource.js";
 import {
   definitionsPath,
@@ -19,11 +20,11 @@ import {
   testWallet,
   type DefinitionsSourceKind,
 } from "./localConfig.js";
-import { OUTPUT_DIR, writeFixtureFile } from "./output.js";
+import { writeFixtureFile } from "./output.js";
 import { parseCalldata } from "./parse.js";
 import { GitError, registryState, updateTo, type RegistryState } from "./registryGit.js";
 import { pinLine, printOutcome } from "./registryReport.js";
-import { TarballError } from "./tarball.js";
+import { displayFormatEntry, TarballError } from "./tarball.js";
 import { bold, dim, green, printAndCopy, truncate, yellow } from "./ui.js";
 import {
   DescriptorError,
@@ -219,19 +220,27 @@ async function saveFixture(
   if (!supported) return;
   const defs = await resolveDefinitionsSource();
   if (!defs) return;
+  // The firmware tests take definitions as JSON at the same eth/chain-id/… path
+  // (common/tests/fixtures/ethereum/definitions), and sign them on the fly.
+  const entry = displayFormatEntry("", deployment.chainId, deployment.address, fn.selector);
   try {
-    const extracted = await extractDefinition(
-      defs,
-      deployment.chainId,
-      deployment.address,
-      fn.selector,
-      OUTPUT_DIR,
+    const blob = await readEntry(defs, entry);
+    if (!blob) {
+      console.log(yellow(`${entry} is not in the definitions source.`));
+      return;
+    }
+    const written = writeFixtureFile(entry.replace(/\.dat$/, ".json"), definitionToJson(blob));
+    console.log(
+      green(`✔ Definition saved as JSON to ${path.relative(process.cwd(), written.path)}`) +
+        (written.overwrote ? dim(" (replaced previous)") : ""),
     );
-    const rel = path.relative(process.cwd(), extracted.path);
-    console.log(extracted.alreadyExtracted ? dim(`Definition already extracted: ${rel}`) : green(`✔ Definition extracted to ${rel}`));
   } catch (err) {
     if (err instanceof TarballError) {
       console.log(yellow(err.message));
+      return;
+    }
+    if (err instanceof DefinitionDecodeError) {
+      console.log(yellow(`Cannot convert ${entry} to JSON: ${err.message}`));
       return;
     }
     throw err;

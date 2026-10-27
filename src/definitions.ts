@@ -68,13 +68,19 @@ function decodeProto(buf: Buffer): ProtoFields {
   return fields;
 }
 
-function payloadOf(blob: Buffer, expectedType: number): ProtoFields | undefined {
+/** The header's definition type and the protobuf payload; undefined when the blob isn't a definition. */
+export function definitionPayload(blob: Buffer): { type: number; data: Buffer } | undefined {
   if (blob.length < HEADER_LENGTH || !/^trzd\d$/.test(blob.subarray(0, 5).toString("latin1"))) return undefined;
-  if (blob[5] !== expectedType) return undefined;
   const length = blob.readUInt16LE(10);
   if (HEADER_LENGTH + length > blob.length) return undefined;
+  return { type: blob[5]!, data: blob.subarray(HEADER_LENGTH, HEADER_LENGTH + length) };
+}
+
+function payloadOf(blob: Buffer, expectedType: number): ProtoFields | undefined {
+  const payload = definitionPayload(blob);
+  if (payload?.type !== expectedType) return undefined;
   try {
-    return decodeProto(blob.subarray(HEADER_LENGTH, HEADER_LENGTH + length));
+    return decodeProto(payload.data);
   } catch {
     return undefined;
   }
