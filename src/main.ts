@@ -208,6 +208,7 @@ async function checkSupport(
 
 async function saveFixture(
   screen: Extract<Screen, { kind: "actions" }>,
+  tx: SampleTx,
   json: string,
   supported: boolean | undefined,
 ): Promise<void> {
@@ -223,6 +224,8 @@ async function saveFixture(
     address: deployment.address,
     selector: fn.selector,
     supported,
+    calldata: tx.input,
+    functionKey: fn.key,
   });
 }
 
@@ -266,7 +269,7 @@ async function runAction(action: string, screen: Extract<Screen, { kind: "action
     }
     const json = await fixtureJson(selection, tx, deployment.chainId, supported, wallet);
     await printAndCopy("Device test fixture:", json);
-    await saveFixture(screen, json, supported);
+    await saveFixture(screen, tx, json, supported);
   }
 }
 
