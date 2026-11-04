@@ -18,8 +18,8 @@ test artifacts from **real on-chain transactions** fetched via Etherscan:
 - the **whole descriptor file**, verbatim.
 
 Every artifact is printed *and* copied to your clipboard. Fixtures are also
-saved under `output/` (gitignored), alongside the function's definition as
-the JSON the firmware tests read.
+saved under `output/` (gitignored), alongside the function's definition and
+the contract's name definition as the JSON the firmware tests read.
 
 ## Prerequisites
 
@@ -311,7 +311,8 @@ output/
 ├── morpho_MorphoBlue_borrow_format.json   ← registry display format
 ├── morpho_MorphoBlue_descriptor.json      ← descriptor file, verbatim
 └── eth/chain-id/1/display-format/
-    └── bbbbbbbbbb…ffcb-50d8cd4b.json      ← definition, as test JSON
+    ├── bbbbbbbbbb…ffcb-50d8cd4b.json      ← definition, as test JSON
+    └── bbbbbbbbbb…ffcb-0000000000000000.json ← contract name, as test JSON
 ```
 
 When you create a fixture for a supported function, its definition is read
@@ -324,6 +325,14 @@ protobuf payload, byte-identical to what trezor-firmware's
 `tools/snippets/eth_defs_dat_to_json.py` writes, except that the signature is
 not verified (the tests re-sign anyway). It is rewritten on every fixture, so
 it always reflects the current source.
+
+Alongside it goes the called contract's **contract-name definition**,
+`display-format/<address>-0000000000000000`, whenever the source has one (for
+supported and unsupported functions alike). It is a display format with an
+8-byte null selector, so it can't collide with a real function, and only its
+`provider_name` matters: the device asks for it to name a contract whenever it
+shows that contract's address. The dev definitions carry these; older tarballs
+don't, and a missing one is just listed, not an error.
 
 To convert a `.dat` you already have:
 
@@ -352,6 +361,7 @@ Source layout:
   registry:*` entrypoint)
 - `src/definitionsSource.ts` — tarball-or-URL dispatch for lookup and reads, and the dev/prod URLs
 - `src/tarball.ts` — Trezor definitions archive lookup and reads
+- `src/fixtureDefinitions.ts` — which definitions a fixture needs, saved as test JSON
 - `src/definitionJson.ts` — `.dat` → firmware test JSON (a port of trezorlib's
   protobuf decoding); `src/datToJsonCli.ts` is its `npm run dat-to-json` entrypoint
 - `src/localConfig.ts` — `config.local.json` and env overrides

@@ -4,14 +4,13 @@ import { EtherscanError, findSampleTx, MAX_SEARCH_DEPTH, type SampleTx } from ".
 import { chainName, explorerTxUrl } from "./explorers.js";
 import { fixtureJson, slug, trezorctlCommand } from "./generate.js";
 import { showRegistryJson } from "./jsonView.js";
-import { DefinitionDecodeError, definitionToJson } from "./definitionJson.js";
 import {
   DEV_DEFINITIONS_URL,
   findDefinition,
   normalizeSource,
   PROD_DEFINITIONS_URL,
-  readEntry,
 } from "./definitionsSource.js";
+import { saveFixtureDefinitions } from "./fixtureDefinitions.js";
 import {
   definitionsPath,
   definitionsSourceKind,
@@ -24,7 +23,7 @@ import { writeFixtureFile } from "./output.js";
 import { parseCalldata } from "./parse.js";
 import { GitError, registryState, updateTo, type RegistryState } from "./registryGit.js";
 import { pinLine, printOutcome } from "./registryReport.js";
-import { displayFormatEntry, TarballError } from "./tarball.js";
+import { TarballError } from "./tarball.js";
 import { bold, dim, green, printAndCopy, truncate, yellow } from "./ui.js";
 import {
   DescriptorError,
@@ -217,34 +216,14 @@ async function saveFixture(
   const written = writeFixtureFile(fileName, json);
   console.log(green(`✔ Fixture saved to ${path.relative(process.cwd(), written.path)}`) + (written.overwrote ? dim(" (replaced previous)") : ""));
 
-  if (!supported) return;
   const defs = await resolveDefinitionsSource();
   if (!defs) return;
-  // The firmware tests take definitions as JSON at the same eth/chain-id/… path
-  // (common/tests/fixtures/ethereum/definitions), and sign them on the fly.
-  const entry = displayFormatEntry("", deployment.chainId, deployment.address, fn.selector);
-  try {
-    const blob = await readEntry(defs, entry);
-    if (!blob) {
-      console.log(yellow(`${entry} is not in the definitions source.`));
-      return;
-    }
-    const written = writeFixtureFile(entry.replace(/\.dat$/, ".json"), definitionToJson(blob));
-    console.log(
-      green(`✔ Definition saved as JSON to ${path.relative(process.cwd(), written.path)}`) +
-        (written.overwrote ? dim(" (replaced previous)") : ""),
-    );
-  } catch (err) {
-    if (err instanceof TarballError) {
-      console.log(yellow(err.message));
-      return;
-    }
-    if (err instanceof DefinitionDecodeError) {
-      console.log(yellow(`Cannot convert ${entry} to JSON: ${err.message}`));
-      return;
-    }
-    throw err;
-  }
+  await saveFixtureDefinitions(defs, {
+    chainId: deployment.chainId,
+    address: deployment.address,
+    selector: fn.selector,
+    supported,
+  });
 }
 
 async function runAction(action: string, screen: Extract<Screen, { kind: "actions" }>): Promise<void> {

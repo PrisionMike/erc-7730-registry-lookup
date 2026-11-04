@@ -31,6 +31,25 @@ export function displayFormatEntry(
 }
 
 /**
+ * Selector of a name-only display format: the firmware asks for one when it
+ * shows an address and wants the contract's name, which is the definition's
+ * `provider_name`. Eight null bytes, so it can't collide with a real 4-byte
+ * selector (trezor-firmware `lookup_known_address`).
+ */
+export const CONTRACT_NAME_SELECTOR = "0000000000000000";
+
+/** <prefix>eth/chain-id/<chainId>/display-format/<address>-0000000000000000.dat */
+export function contractNameEntry(prefix: string, chainId: number, address: string): string {
+  return displayFormatEntry(prefix, chainId, address, CONTRACT_NAME_SELECTOR);
+}
+
+/** <prefix>eth/chain-id/<chainId>/token-<address>.dat */
+export function tokenEntry(prefix: string, chainId: number, address: string): string {
+  const addr = address.toLowerCase().replace(/^0x/, "");
+  return `${prefix}eth/chain-id/${chainId}/token-${addr}.dat`;
+}
+
+/**
  * Definitions always sit under an `eth/chain-id/` component, but how deeply
  * that is nested depends on which ball you point at:
  *   deploy.tar.xz      → definitions/eth/chain-id/...

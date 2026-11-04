@@ -1,4 +1,5 @@
 import { readEntry } from "./definitionsSource.js";
+import { tokenEntry } from "./tarball.js";
 
 /**
  * Token and network metadata from the Trezor definitions tarball — the same
@@ -119,8 +120,7 @@ export async function tokenDefinition(
   chainId: number,
   address: string,
 ): Promise<TokenDefinition | undefined> {
-  const addr = address.toLowerCase().replace(/^0x/, "");
-  const fields = await definition(source, `eth/chain-id/${chainId}/token-${addr}.dat`, TYPE_TOKEN);
+  const fields = await definition(source, tokenEntry("", chainId, address), TYPE_TOKEN);
   if (!fields) return undefined;
   const symbol = str(fields, 3);
   const decimals = num(fields, 4);
