@@ -15,7 +15,11 @@ test artifacts from **real on-chain transactions** fetched via Etherscan:
 - the **registry's own display format** for that function, with its `$.`
   references resolved, so you can see exactly how the registry wants the
   transaction rendered,
-- the **whole descriptor file**, verbatim.
+- the **whole descriptor file**, verbatim,
+- a **cooked** transaction: start from a real one, edit the values its
+  standard parse shows (amounts, addresses, dates, enums, `msg.value`, chain
+  id, …), and get any of the above for the edited version — plus a registry
+  test case.
 
 Every artifact is printed *and* copied to your clipboard. Fixtures are also
 saved under `output/` (gitignored), alongside the definitions the test needs
@@ -135,7 +139,7 @@ generated fixtures; leave it out and fixtures get empty `result` signatures.
 | Etherscan API key | `ETHERSCAN_API_KEY` env var, or `etherscanApiKey` in `config.local.json` |
 | Blockscout PRO API key (optional) | `BLOCKSCOUT_API_KEY` env var, or `blockscoutApiKey` in `config.local.json` |
 | Fixture-signing test wallet | `testWallet` in `config.local.json` |
-| Definitions source (used for the `--definitions` flag, the support check, the fixture's definition JSON, and token metadata in the standard parse) | Pick it from **Definitions source** on the home screen, or set `definitionsSource` (`tarball` · `dev` · `prod`) in `config.local.json`. See [Definitions source](#definitions-source) |
+| Definitions source (used for the `--definitions` flag, the support check, the fixture's definition JSON, and token metadata in the standard parse) | Pick it from **Definitions source** on the home screen, or set `definitionsSource` (`tarball` · `dev` · `dev-signed` · `prod`) in `config.local.json`. See [Definitions source](#definitions-source) |
 | Definitions tarball path (when the source is `tarball`) | `TREZOR_DEFINITIONS` env var, or `definitionsPath` in `config.local.json` — you're prompted once and the answer is saved there |
 
 Note: a free-tier Etherscan key covers Ethereum mainnet and some other
@@ -256,6 +260,74 @@ Both are copied to the clipboard and saved under `output/`. Anything longer
 than 120 lines is previewed rather than dumped, and offers to open in `$PAGER`
 (default `less`).
 
+## Cooking a transaction
+
+**Cook a transaction** (on the action screen) lets you change what a real
+transaction says before turning it into artifacts — an amount of 0, an
+unlimited approval, an expired deadline, a token the device doesn't know, a
+recipient that is the sender.
+
+1. **Pick a starting transaction**: the latest one on-chain (the same
+   Etherscan / Blockscout lookup the other actions use, and the default), or
+   any case from the registry's own `tests/` and `testsv2/` files that calls
+   this function.
+2. **Edit.** The menu lists the transaction's own fields, then every field of
+   the standard parse with its rendered value. A field whose format reads
+   another value gets a `↳` row for it — a `tokenAmount`'s token (its
+   `tokenPath`), a `calldata` field's callee, and so on. Pick a row to change
+   it, and the parse re-renders straight away (warnings included), so you see
+   what the device-facing display becomes. Edited rows are marked `✎ edited`;
+   setting a value back to where it started clears the mark.
+3. **Done** → choose a trezorctl command, the standard parse, a device test
+   fixture, a registry test case, the raw transaction, or all of them. You can
+   come back and keep editing.
+
+Every edit offers presets plus **Manual…**, which starts from the current
+value:
+
+| Value | Presets |
+|---|---|
+| Address (`addressName`, `tokenTicker`, a token, spender, callee) | `0xDDdD…`, `0xEeee…` (the usual native-currency placeholder), `0x0000…`, `msg.from`, `msg.to`, the test wallet; for `msg.to`, the descriptor's other deployments |
+| Amount (`amount`, `tokenAmount`, `msg.value`) | 0, 1, max; the descriptor's threshold (e.g. renders “All”/“Unlimited”); one whole native coin |
+| `date` | now, in 1 hour / 1 day / 30 days / 1 year, 1 hour ago, 2³²−1 — shown as dates; manual is a raw integer |
+| `duration` | 1 hour … 365 days |
+| `enum` | the descriptor's enum values by name |
+| `chainId`, chain id | the chains this tool knows |
+| bool | true / false |
+| bytes | empty or all-zero; manual hex (a fixed size, e.g. `bytes32` or a `.[0:20]` slice, must stay that size) |
+
+**Any calldata argument** reaches arguments the parse hides
+(`visible: never`, e.g. a permit's deadline), and **Raw calldata** edits the
+hex directly. Descriptor constants (`$.metadata…`) show but can't be edited:
+they aren't in the transaction.
+
+How the edits map back: the function's signature (its registry format key)
+decodes the calldata, and each display field's `path` — with field groups,
+`.[]` iteration, `$ref` definitions and byte slices resolved exactly as the
+renderer does — picks the argument it shows. Edits re-encode the call; bytes
+after the arguments (some routers append a referral tag) are kept. Array
+lengths can't change. Functions keyed by a bare selector have no signature,
+so only the transaction fields and raw calldata are editable.
+
+Notes on the outputs:
+
+- `msg.from` only matters to the standard parse (`@.from`); trezorctl and
+  fixtures sign as the device's own account. When the starting transaction
+  names no sender, `msg.from` starts as the test wallet.
+- The fixture is named `<provider>_<descriptor>_<function>_cooked` by default
+  (you're asked, pre-filled), its comment says what it was cooked from and
+  what changed, and it is saved with its definitions like any other fixture.
+  Support is checked for the cooked chain id, `to` and selector.
+- The **registry test case** is a whole `.tests.json`
+  (`specs/erc7730-tests-v2.schema.json`) with one case: the unsigned legacy
+  transaction as `rawTx`, `from` only when the descriptor reads `@.from`, the
+  rendered display as `expected` (groups flattened, nested calls nested), and
+  the tokens it rendered with as `dataProvider.tokens`, so the registry CI —
+  which never touches the network — renders it the same way. It is saved as
+  `output/<…>_<chainId>_cooked.tests.json`; merge its case into
+  `registry/<provider>/testsv2/`, after checking `expected` is what the
+  device should show.
+
 ## Definitions source
 
 The **Definitions source** entry on the home screen picks where definitions
@@ -267,9 +339,10 @@ standard parse read from:
 |---|---|
 | **Tarball** (default) | your tarball path — offered pre-filled with the current one, edit it freely (leave empty to omit the flag) |
 | **Dev definitions** | `https://dev.firmware.sldev.cz/unsigned/v2/definitions/` — the output of trezor/definitions' "[Deploy] unsigned dev firmware definitions" workflow |
+| **Dev signed definitions** | `https://dev.firmware.sldev.cz/signed/v2/definitions/` — the dev channel's signed definitions |
 | **Prod definitions** | `https://data.trezor.io/firmware/definitions/v2/` |
 
-Both URLs are the v2 tree (`trzd2` blobs). trezorlib's own `-a` default is the
+All URLs are the v2 tree (`trzd2` blobs). trezorlib's own `-a` default is the
 unversioned `data.trezor.io/firmware/definitions/` path, which still serves
 legacy v1 blobs. The selection is saved as `definitionsSource` in
 `config.local.json`.
@@ -369,6 +442,12 @@ Source layout:
 - `src/selector.ts` — signature → 4-byte selector via ethers
 - `src/etherscan.ts` — Etherscan V2 client (with Blockscout / Routescan fallback)
 - `src/generate.ts` — trezorctl command and fixture builders
+- `src/cook.ts` — the cook session: starting transaction, edit menu, outputs;
+  `src/cookSlots.ts` maps display fields to the values they show,
+  `src/calldataTree.ts` decodes, edits and re-encodes calldata by those paths,
+  `src/cookPrompts.ts` holds the per-format value pickers,
+  `src/registryTests.ts` finds registry test cases to start from, and
+  `src/testCase.ts` writes a cooked transaction as one
 - `src/jsonView.ts` — the display-format and descriptor JSON dumps
 - `src/registryGit.ts` — submodule status and updates; `src/registryReport.ts`
   renders their results, shared with `src/registryCli.ts` (the `npm run

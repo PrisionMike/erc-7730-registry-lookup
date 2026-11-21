@@ -1,6 +1,4 @@
 import { getAddress, HDNodeWallet, Mnemonic, Transaction } from "ethers";
-import type { SampleTx } from "./etherscan.js";
-import { explorerTxUrl } from "./explorers.js";
 import type { TestWallet } from "./localConfig.js";
 
 const DERIVATION_PATH_TREZORCTL = "m/44h/60h/0h/0/0";
@@ -11,10 +9,17 @@ const DERIVATION_PATH_FIXTURE = "m/44'/60'/0'/0/0";
 // signature computed over them must use the same values or the sigs won't verify.
 const FIXTURE_NONCE = 0x0;
 
-export interface Selection {
-  provider: string;
-  descriptorName: string;
-  functionName: string;
+/** What the artifacts need of a transaction; a SampleTx has all of it, and so does a cooked one. */
+export interface TxFields {
+  to: string;
+  /** Calldata, with or without 0x. */
+  input: string;
+  /** Wei, decimal string. */
+  value: string;
+  /** Gas limit, decimal string. */
+  gas: string;
+  /** Wei, decimal string. */
+  gasPrice: string;
 }
 
 function stripHexPrefix(hex: string): string {
@@ -29,7 +34,7 @@ export function slug(...parts: string[]): string {
 }
 
 /** `definitionsPath` is whatever --definitions takes: a tarball path or a URL. */
-export function trezorctlCommand(tx: SampleTx, chainId: number, definitionsPath?: string): string {
+export function trezorctlCommand(tx: TxFields, chainId: number, definitionsPath?: string): string {
   const definitions = definitionsPath ? `--definitions ${definitionsPath} ` : "";
   return (
     `trezorctl ethereum ${definitions}sign-tx ` +
@@ -48,15 +53,18 @@ interface FixtureResult {
   sig_s: string;
 }
 
-/**
- * Sign the fixture's legacy (EIP-155) transaction with the test wallet at the
- * fixture's derivation path. Returns sig_v as chainId*2+35+yParity and r/s as
- * unprefixed 64-char hex, matching the firmware test suite fixtures.
- */
-async function signFixtureTx(tx: SampleTx, chainId: number, wallet: TestWallet): Promise<FixtureResult> {
-  const mnemonic = Mnemonic.fromPhrase(wallet.mnemonic, wallet.passphrase);
-  const signer = HDNodeWallet.fromMnemonic(mnemonic, DERIVATION_PATH_FIXTURE);
-  const serialized = await signer.signTransaction({
+function fixtureSigner(wallet: TestWallet): HDNodeWallet {
+  return HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase(wallet.mnemonic, wallet.passphrase), DERIVATION_PATH_FIXTURE);
+}
+
+/** The account fixtures (and trezorctl, on a device with the test seed) sign as. */
+export function testWalletAddress(wallet: TestWallet): string {
+  return fixtureSigner(wallet).address;
+}
+
+/** The fixture's exact legacy EIP-155 transaction, before signing. */
+function fixtureTx(tx: TxFields, chainId: number) {
+  return {
     type: 0,
     chainId,
     nonce: FIXTURE_NONCE,
@@ -65,7 +73,21 @@ async function signFixtureTx(tx: SampleTx, chainId: number, wallet: TestWallet):
     to: getAddress(tx.to),
     value: BigInt(tx.value),
     data: "0x" + stripHexPrefix(tx.input),
-  });
+  };
+}
+
+/** The fixture's transaction serialized unsigned — a registry test case's rawTx. */
+export function unsignedRawTx(tx: TxFields, chainId: number): string {
+  return Transaction.from(fixtureTx(tx, chainId)).unsignedSerialized;
+}
+
+/**
+ * Sign the fixture's legacy (EIP-155) transaction with the test wallet at the
+ * fixture's derivation path. Returns sig_v as chainId*2+35+yParity and r/s as
+ * unprefixed 64-char hex, matching the firmware test suite fixtures.
+ */
+async function signFixtureTx(tx: TxFields, chainId: number, wallet: TestWallet): Promise<FixtureResult> {
+  const serialized = await fixtureSigner(wallet).signTransaction(fixtureTx(tx, chainId));
   const signature = Transaction.from(serialized).signature;
   if (!signature) {
     throw new Error("Signing produced a transaction without a signature");
@@ -77,17 +99,19 @@ async function signFixtureTx(tx: SampleTx, chainId: number, wallet: TestWallet):
   };
 }
 
+/** `origin` follows the support prefix in the comment: an explorer link, or how the tx was cooked. */
 export async function fixtureJson(
-  sel: Selection,
-  tx: SampleTx,
+  name: string,
+  origin: string,
+  tx: TxFields,
   chainId: number,
   supported?: boolean,
   wallet?: TestWallet,
 ): Promise<string> {
   const fixture = {
-    name: slug(sel.provider, sel.descriptorName, sel.functionName),
+    name,
     parameters: {
-      comment: `${supported === false ? "unsupported" : "supported"} | ${explorerTxUrl(chainId, tx.hash)}`,
+      comment: `${supported === false ? "unsupported" : "supported"} | ${origin}`,
       data: stripHexPrefix(tx.input),
       path: DERIVATION_PATH_FIXTURE,
       to_address: getAddress(tx.to),

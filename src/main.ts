@@ -1,16 +1,18 @@
 import path from "node:path";
 import { input, search, select } from "@inquirer/prompts";
+import { cook, type SupportTarget } from "./cook.js";
 import { EtherscanError, findSampleTx, MAX_SEARCH_DEPTH, type SampleTx } from "./etherscan.js";
 import { chainName, explorerTxUrl } from "./explorers.js";
 import { fixtureJson, slug, trezorctlCommand } from "./generate.js";
 import { showRegistryJson } from "./jsonView.js";
 import {
   DEV_DEFINITIONS_URL,
+  DEV_SIGNED_DEFINITIONS_URL,
   findDefinition,
   normalizeSource,
   PROD_DEFINITIONS_URL,
 } from "./definitionsSource.js";
-import { saveFixtureDefinitions } from "./fixtureDefinitions.js";
+import { saveFixtureDefinitions, type FixtureTarget } from "./fixtureDefinitions.js";
 import {
   definitionsPath,
   definitionsSourceKind,
@@ -103,6 +105,7 @@ async function ensureSampleTx(screen: Extract<Screen, { kind: "actions" }>): Pro
 async function resolveDefinitionsSource(): Promise<string | undefined> {
   const kind = definitionsSourceKind();
   if (kind === "dev") return DEV_DEFINITIONS_URL;
+  if (kind === "dev-signed") return DEV_SIGNED_DEFINITIONS_URL;
   if (kind === "prod") return PROD_DEFINITIONS_URL;
   const existing = definitionsPath();
   if (existing !== undefined) return normalizeSource(existing) || undefined;
@@ -123,6 +126,8 @@ function describeDefinitionsSource(kind: DefinitionsSourceKind): string {
   switch (kind) {
     case "dev":
       return `Dev definitions (${DEV_DEFINITIONS_URL})`;
+    case "dev-signed":
+      return `Dev signed definitions (${DEV_SIGNED_DEFINITIONS_URL})`;
     case "prod":
       return `Prod definitions (${PROD_DEFINITIONS_URL})`;
     case "tarball":
@@ -170,25 +175,16 @@ async function updateRegistry(target: "latest" | "ref", stack: Screen[]): Promis
  * function-contract-deployment. Returns undefined when none is configured or
  * it cannot be read.
  */
-async function checkSupport(
-  screen: Extract<Screen, { kind: "actions" }>,
-  { verbose }: { verbose: boolean },
-): Promise<boolean | undefined> {
+async function checkSupport(target: SupportTarget, { verbose }: { verbose: boolean }): Promise<boolean | undefined> {
   const defs = await resolveDefinitionsSource();
   if (!defs) {
     if (verbose) console.log(yellow("No definitions source configured — cannot check Trezor support."));
     return undefined;
   }
-  const { fn, deployment } = screen;
   let entry: string;
   let supported: boolean;
   try {
-    ({ entry, found: supported } = await findDefinition(
-      defs,
-      deployment.chainId,
-      deployment.address,
-      fn.selector,
-    ));
+    ({ entry, found: supported } = await findDefinition(defs, target.chainId, target.address, target.selector));
   } catch (err) {
     if (err instanceof TarballError) {
       console.log(yellow(err.message));
@@ -206,32 +202,33 @@ async function checkSupport(
   return supported;
 }
 
-async function saveFixture(
-  screen: Extract<Screen, { kind: "actions" }>,
-  tx: SampleTx,
-  json: string,
-  supported: boolean | undefined,
-): Promise<void> {
-  const { descriptor, fn, deployment } = screen;
-  const fileName = `${slug(descriptor.provider, descriptor.name, fn.name)}_${deployment.chainId}.json`;
+/** Write the fixture to output/, then the definitions its test needs, as JSON beside it. */
+async function saveFixture(fileName: string, target: FixtureTarget, json: string): Promise<void> {
   const written = writeFixtureFile(fileName, json);
   console.log(green(`✔ Fixture saved to ${path.relative(process.cwd(), written.path)}`) + (written.overwrote ? dim(" (replaced previous)") : ""));
 
   const defs = await resolveDefinitionsSource();
   if (!defs) return;
-  await saveFixtureDefinitions(defs, {
-    chainId: deployment.chainId,
-    address: deployment.address,
-    selector: fn.selector,
-    supported,
-    calldata: tx.input,
-    functionKey: fn.key,
-  });
+  await saveFixtureDefinitions(defs, target);
 }
 
 async function runAction(action: string, screen: Extract<Screen, { kind: "actions" }>): Promise<void> {
+  if (action === "cook") {
+    await cook({
+      descriptor: screen.descriptor,
+      fn: screen.fn,
+      deployment: screen.deployment,
+      sampleTx: () => ensureSampleTx(screen),
+      definitionsSource: resolveDefinitionsSource,
+      checkSupport,
+      saveFixture,
+    });
+    return;
+  }
+
+  const target = { chainId: screen.deployment.chainId, address: screen.deployment.address, selector: screen.fn.selector };
   const needsSupport = action === "support" || action === "fixture" || action === "all";
-  const supported = needsSupport ? await checkSupport(screen, { verbose: action !== "fixture" }) : undefined;
+  const supported = needsSupport ? await checkSupport(target, { verbose: action !== "fixture" }) : undefined;
   if (action === "support") return;
 
   if (action === "format" || action === "descriptor") {
@@ -250,26 +247,38 @@ async function runAction(action: string, screen: Extract<Screen, { kind: "action
   const tx = await ensureSampleTx(screen);
   if (!tx) return;
   const { descriptor, fn, deployment } = screen;
-  const selection = { provider: descriptor.provider, descriptorName: descriptor.name, functionName: fn.name };
+  const stem = slug(descriptor.provider, descriptor.name, fn.name);
+  const txUrl = explorerTxUrl(deployment.chainId, tx.hash);
 
   if (action === "command" || action === "all") {
     const defs = await resolveDefinitionsSource();
     await printAndCopy("trezorctl command:", trezorctlCommand(tx, deployment.chainId, defs));
   }
   if (action === "link" || action === "all") {
-    await printAndCopy("Etherscan link:", explorerTxUrl(deployment.chainId, tx.hash));
+    await printAndCopy("Etherscan link:", txUrl);
   }
   if (action === "parse" || action === "all") {
-    await parseCalldata(descriptor, fn, deployment, tx, await resolveDefinitionsSource());
+    const parseTx = {
+      chainId: deployment.chainId,
+      to: tx.to,
+      data: tx.input,
+      value: BigInt(tx.value),
+      ...(tx.from ? { from: tx.from } : {}),
+    };
+    await parseCalldata(descriptor, parseTx, await resolveDefinitionsSource(), {
+      title: "Standard parse",
+      fileStem: `${stem}_${deployment.chainId}`,
+      origin: txUrl,
+    });
   }
   if (action === "fixture" || action === "all") {
     const wallet = testWallet();
     if (!wallet) {
       console.log(dim("No testWallet in config.local.json — result signatures left empty."));
     }
-    const json = await fixtureJson(selection, tx, deployment.chainId, supported, wallet);
+    const json = await fixtureJson(stem, txUrl, tx, deployment.chainId, supported, wallet);
     await printAndCopy("Device test fixture:", json);
-    await saveFixture(screen, tx, json, supported);
+    await saveFixture(`${stem}_${deployment.chainId}.json`, { ...target, supported, calldata: tx.input, functionKey: fn.key }, json);
   }
 }
 
@@ -282,7 +291,7 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
           { name: "Browse the registry", value: "browse" },
           { name: "Registry (update / pin info)", value: "registry" },
           {
-            name: "Definitions source (tarball / dev / prod)",
+            name: "Definitions source (tarball / dev / dev signed / prod)",
             value: "definitions",
             description: dim(`Current: ${describeDefinitionsSource(definitionsSourceKind())}`),
           },
@@ -319,6 +328,11 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
             name: label("dev", "Dev definitions"),
             value: "dev",
             description: dim(`${DEV_DEFINITIONS_URL} (trezor/definitions “unsigned dev” deploy, v2)`),
+          },
+          {
+            name: label("dev-signed", "Dev signed definitions"),
+            value: "dev-signed",
+            description: dim(`${DEV_SIGNED_DEFINITIONS_URL} (dev channel, signed, v2)`),
           },
           {
             name: label("prod", "Prod definitions"),
@@ -482,6 +496,11 @@ async function showScreen(screen: Screen, stack: Screen[]): Promise<void> {
           { name: "Device test fixture JSON (saved to output/)", value: "fixture" },
           { name: "Check Trezor support (is the definition in the definitions source?)", value: "support" },
           { name: "All of the above", value: "all" },
+          {
+            name: "Cook a transaction — edit a real one's fields, then generate any of the above",
+            value: "cook",
+            description: dim("Start from the latest on-chain tx or a registry test case; change amounts, addresses, dates, msg.value, chain id…"),
+          },
           { name: "Show the registry's display format for this function (JSON)", value: "format" },
           { name: "Show the whole descriptor file (JSON)", value: "descriptor" },
           { name: "← Back", value: BACK },

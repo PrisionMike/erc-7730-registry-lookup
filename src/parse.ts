@@ -12,9 +12,6 @@ import {
 } from "@ethereum-sourcify/clear-signing";
 import { createFilesystemResolver } from "@ethereum-sourcify/clear-signing/filesystem";
 import { networkDefinition, tokenDefinition } from "./definitions.js";
-import type { SampleTx } from "./etherscan.js";
-import { explorerTxUrl } from "./explorers.js";
-import { slug } from "./generate.js";
 import { writeFixtureFile } from "./output.js";
 import {
   DescriptorError,
@@ -24,7 +21,6 @@ import {
   REGISTRY_REPO_ROOT,
   type Deployment,
   type Descriptor,
-  type FunctionEntry,
 } from "./registry.js";
 import { TarballError } from "./tarball.js";
 import { dim, green, printAndCopy, yellow } from "./ui.js";
@@ -54,10 +50,10 @@ function caip10(d: Deployment): string {
  * descriptor too. Paths are relative to the submodule root, which gives the
  * library's include resolution room for "../../ercs/…" walks.
  *
- * Rebuilt per parse rather than cached: it is cheap, and the registry can be
- * moved mid-session.
+ * Rebuilt per parse rather than cached, as the registry can be moved
+ * mid-session; a caller rendering many times in a row (cooking) builds it once.
  */
-function buildIndex(selected: Descriptor): RegistryIndex {
+export function buildIndex(selected: Descriptor): RegistryIndex {
   const calldataIndex: Record<string, string> = {};
   for (const provider of listProviders()) {
     for (const file of listDescriptorFiles(provider)) {
@@ -111,7 +107,7 @@ function dataProvider(tarball: string | undefined, errors: Set<string>): Externa
 const INDENT = "  ";
 const MAX_LABEL_PAD = 28;
 
-function intentText(intent: DisplayModel["intent"]): string | undefined {
+export function intentText(intent: DisplayModel["intent"]): string | undefined {
   if (intent == null) return undefined;
   if (typeof intent === "string") return intent;
   return Object.entries(intent)
@@ -192,41 +188,84 @@ function renderModel(r: Render, model: DisplayModel, indent: string): void {
 
 // ── Entry point ─────────────────────────────────────────────────────────────
 
-export async function parseCalldata(
-  descriptor: Descriptor,
-  fn: FunctionEntry,
-  deployment: Deployment,
-  tx: SampleTx,
-  tarball: string | undefined,
-): Promise<void> {
-  const version = libraryVersion();
-  const index = buildIndex(descriptor);
-  const tarballErrors = new Set<string>();
-  if (!tarball) {
-    console.log(dim("No definitions source configured — token amounts and the native currency will render raw."));
-  }
+/** What the renderer needs of a transaction: a real one, or a cooked one. */
+export interface ParseTx {
+  chainId: number;
+  to: string;
+  /** Calldata, 0x-prefixed. */
+  data: string;
+  value: bigint;
+  /** The sender, for descriptors that show @.from. */
+  from?: string;
+}
 
+/**
+ * Render a transaction against the pinned registry, with token and network
+ * metadata from the definitions source. Definitions-source errors are
+ * collected rather than thrown, so a source outage still renders (raw).
+ */
+export async function formatTx(
+  selected: Descriptor,
+  tx: ParseTx,
+  definitions: string | undefined,
+  index: RegistryIndex = buildIndex(selected),
+): Promise<{ model: DisplayModel; sourceErrors: Set<string> }> {
+  const sourceErrors = new Set<string>();
   const model = await format(
-    {
-      chainId: deployment.chainId,
-      to: tx.to,
-      data: tx.input,
-      value: BigInt(tx.value),
-      ...(tx.from ? { from: tx.from } : {}),
-    },
+    { chainId: tx.chainId, to: tx.to, data: tx.data, value: tx.value, ...(tx.from ? { from: tx.from } : {}) },
     {
       descriptorResolverOptions: {
         type: "custom",
         resolver: createFilesystemResolver({ index, descriptorDirectory: REGISTRY_REPO_ROOT }),
       },
-      externalDataProvider: dataProvider(tarball, tarballErrors),
+      externalDataProvider: dataProvider(definitions, sourceErrors),
     },
   );
-  for (const message of tarballErrors) console.log(yellow(message));
+  return { model, sourceErrors };
+}
+
+/** The rendered fields in display order, groups flattened, as a wallet lists them. */
+export function flatFields(model: DisplayModel): DisplayField[] {
+  const out: DisplayField[] = [];
+  const walk = (fields: (DisplayField | DisplayFieldGroup)[]) => {
+    for (const f of fields) {
+      if (isFieldGroup(f)) walk(f.fields);
+      else out.push(f);
+    }
+  };
+  walk(model.fields ?? []);
+  return out;
+}
+
+export const RENDERER = (): string => `${LIBRARY}@${libraryVersion()}`;
+
+export interface ParseOutput {
+  /** Heading above the rendered display. */
+  title: string;
+  /** output/<fileStem>_parsed.json */
+  fileStem: string;
+  /** Where the transaction came from: an explorer link, or how it was cooked. */
+  origin: string;
+  /** Extra keys for the saved JSON, e.g. a cooked transaction's fields. */
+  extra?: Record<string, unknown>;
+}
+
+/** Print, copy and save the standard parse of a transaction; returns the display model. */
+export async function parseCalldata(
+  descriptor: Descriptor,
+  tx: ParseTx,
+  definitions: string | undefined,
+  out: ParseOutput,
+): Promise<DisplayModel> {
+  if (!definitions) {
+    console.log(dim("No definitions source configured — token amounts and the native currency will render raw."));
+  }
+  const { model, sourceErrors } = await formatTx(descriptor, tx, definitions);
+  for (const message of sourceErrors) console.log(yellow(message));
 
   const r: Render = { lines: [], warned: false, unnamedAddresses: 0 };
   renderModel(r, model, "");
-  await printAndCopy(`Standard parse (${LIBRARY}@${version}, as the registry CI renders it):`, r.lines.join("\n"));
+  await printAndCopy(`${out.title} (${RENDERER()}, as the registry CI renders it):`, r.lines.join("\n"));
   if (r.unnamedAddresses > 0) {
     console.log(dim(`${r.unnamedAddresses} address field(s) shown raw: no ENS or local-name source is wired in.`));
   }
@@ -234,13 +273,9 @@ export async function parseCalldata(
     r.warned ? yellow("The renderer reported warnings — see ⚠ lines above.") : green("✔ Rendered with no warnings."),
   );
 
-  const payload = {
-    transaction: explorerTxUrl(deployment.chainId, tx.hash),
-    renderer: `${LIBRARY}@${version}`,
-    display: model,
-  };
+  const payload = { transaction: out.origin, ...out.extra, renderer: RENDERER(), display: model };
   const written = writeFixtureFile(
-    `${slug(descriptor.provider, descriptor.name, fn.name)}_${deployment.chainId}_parsed.json`,
+    `${out.fileStem}_parsed.json`,
     JSON.stringify(payload, (_, v: unknown) => (typeof v === "bigint" ? v.toString() : v), 2),
   );
   console.log(
@@ -248,4 +283,5 @@ export async function parseCalldata(
       (written.overwrote ? dim(" (replaced previous)") : "") +
       "\n",
   );
+  return model;
 }

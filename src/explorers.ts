@@ -32,3 +32,10 @@ export function explorerTxUrl(chainId: number, hash: string): string {
   const explorer = EXPLORERS[chainId];
   return explorer ? `https://${explorer.host}/tx/${hash}` : `https://blockscan.com/tx/${hash}`;
 }
+
+/** Every chain id with a known explorer, in ascending order. */
+export function knownChainIds(): number[] {
+  return Object.keys(EXPLORERS)
+    .map(Number)
+    .sort((a, b) => a - b);
+}
