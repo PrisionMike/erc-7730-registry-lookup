@@ -10,8 +10,8 @@ export interface TestWallet {
   passphrase: string;
 }
 
-/** Where trezorctl --definitions points: a tarball you hold, or the dev/prod deploys. */
-export type DefinitionsSourceKind = "tarball" | "dev" | "prod";
+/** Where trezorctl --definitions points: a tarball you hold, or the dev (unsigned or signed) / prod deploys. */
+export type DefinitionsSourceKind = "tarball" | "dev" | "dev-signed" | "prod";
 
 interface LocalConfig {
   etherscanApiKey?: string;
@@ -60,7 +60,12 @@ function readLocalConfig(): LocalConfig {
     cached.blockscoutApiKey = parsed.blockscoutApiKey;
   }
   cached.testWallet = parseTestWallet(parsed.testWallet);
-  if (parsed.definitionsSource === "tarball" || parsed.definitionsSource === "dev" || parsed.definitionsSource === "prod") {
+  if (
+    parsed.definitionsSource === "tarball" ||
+    parsed.definitionsSource === "dev" ||
+    parsed.definitionsSource === "dev-signed" ||
+    parsed.definitionsSource === "prod"
+  ) {
     cached.definitionsSource = parsed.definitionsSource;
   }
   // Kept verbatim: "" is a meaningful answer meaning "omit --definitions",

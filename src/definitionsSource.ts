@@ -14,6 +14,9 @@ import { TarballError } from "./tarball.js";
 /** Output of trezor/definitions' "[Deploy] unsigned dev firmware definitions" workflow. */
 export const DEV_DEFINITIONS_URL = "https://dev.firmware.sldev.cz/unsigned/v2/definitions/";
 
+/** The dev channel's signed definitions (v2): what a dev-channel firmware verifies against. */
+export const DEV_SIGNED_DEFINITIONS_URL = "https://dev.firmware.sldev.cz/signed/v2/definitions/";
+
 /** Output of the production deploy: <bucket>/firmware/definitions/vN for N ≥ 2. */
 export const PROD_DEFINITIONS_URL = "https://data.trezor.io/firmware/definitions/v2/";
 
